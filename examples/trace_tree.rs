@@ -19,7 +19,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(Object::Dictionary(dict)) = doc.get_object(id) {
                 let indent = "  ".repeat(level);
                 println!("{}Node {:?}:", indent, id);
-                println!("{}  Keys: {:?}", indent, dict.iter().map(|(k, _)| String::from_utf8_lossy(k).to_string()).collect::<Vec<_>>());
+                println!(
+                    "{}  Keys: {:?}",
+                    indent,
+                    dict.iter()
+                        .map(|(k, _)| String::from_utf8_lossy(k).to_string())
+                        .collect::<Vec<_>>()
+                );
 
                 // Check for Resources
                 if let Ok(res) = dict.get(b"Resources") {
@@ -27,12 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // Get parent
-                current_id = if let Ok(parent) = dict.get(b"Parent") {
-                    if let Object::Reference(parent_id) = parent {
-                        Some(*parent_id)
-                    } else {
-                        None
-                    }
+                current_id = if let Ok(Object::Reference(parent_id)) = dict.get(b"Parent") {
+                    Some(*parent_id)
                 } else {
                     None
                 };

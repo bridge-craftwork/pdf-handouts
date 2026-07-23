@@ -1,8 +1,8 @@
 //! Debug merged PDF structure
 
+use lopdf::Document;
 use pdf_handouts::pdf::{merge_pdfs, MergeOptions};
 use std::path::{Path, PathBuf};
-use lopdf::Document;
 
 fn main() {
     let test_files = vec![
@@ -88,7 +88,6 @@ fn main() {
             println!("\nTrying get_pages()...");
             let pages = doc.get_pages();
             println!("get_pages() returned {} pages", pages.len());
-
         }
         Err(e) => {
             eprintln!("Failed to load merged PDF: {}", e);

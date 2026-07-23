@@ -1,10 +1,10 @@
 //! PDF creation for headers/footers using krilla
 
-use std::path::Path;
+use crate::date::format_date;
+use crate::error::{Error, Result};
 use chrono::NaiveDate;
 use krilla::font::Font;
-use crate::error::{Error, Result};
-use crate::date::format_date;
+use std::path::Path;
 
 /// Options for creating a watermark PDF with headers and footers
 #[derive(Debug, Clone)]
@@ -62,14 +62,11 @@ impl Default for WatermarkOptions {
 ///
 /// Note: This is a Phase 2 implementation that creates overlay PDFs. It does not
 /// scale the source content, so headers/footers may overlap existing content.
-pub fn create_watermark_pdf(
-    output: &Path,
-    options: &WatermarkOptions,
-) -> Result<()> {
-    use krilla::{Document, PageSettings};
+pub fn create_watermark_pdf(output: &Path, options: &WatermarkOptions) -> Result<()> {
     use krilla::color::rgb;
     use krilla::path::Fill;
     use krilla::surface::TextDirection;
+    use krilla::{Document, PageSettings};
     use tiny_skia_path::Point;
 
     // Create document
@@ -103,7 +100,7 @@ pub fn create_watermark_pdf(
                         ..Default::default()
                     },
                     font.clone(),
-                    options.title_font_size as f32,
+                    options.title_font_size,
                     &[],
                     title,
                     false,
@@ -214,7 +211,8 @@ pub fn create_watermark_pdf(
     }
 
     // Write PDF
-    let pdf_data = document.finish()
+    let pdf_data = document
+        .finish()
         .map_err(|e| Error::General(format!("Failed to generate PDF: {:?}", e)))?;
 
     std::fs::write(output, pdf_data)?;
@@ -288,7 +286,8 @@ fn measure_text_width(text: &str, font_size: f32) -> f32 {
     use rustybuzz::{Face, UnicodeBuffer};
 
     // Use the embedded font data
-    const LIBERATION_SERIF: &[u8] = include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
+    const LIBERATION_SERIF: &[u8] =
+        include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
 
     // Parse the font face
     let face = match Face::from_slice(LIBERATION_SERIF, 0) {
@@ -307,7 +306,8 @@ fn measure_text_width(text: &str, font_size: f32) -> f32 {
     let units_per_em = face.units_per_em() as f32;
     let scale = font_size / units_per_em;
 
-    let total_advance: i32 = output.glyph_positions()
+    let total_advance: i32 = output
+        .glyph_positions()
         .iter()
         .map(|pos| pos.x_advance)
         .sum();
@@ -321,7 +321,8 @@ fn measure_text_width(text: &str, font_size: f32) -> f32 {
 /// The font is compiled directly into the binary for cross-platform compatibility.
 fn load_default_font() -> Result<Font> {
     // Embed Liberation Serif font at compile time
-    const LIBERATION_SERIF: &[u8] = include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
+    const LIBERATION_SERIF: &[u8] =
+        include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
 
     use std::sync::Arc;
 
@@ -377,7 +378,10 @@ mod tests {
 
         // Mixed syntaxes
         let lines = parse_multiline_text("Line 1\nLine 2|Line 3[br]Line 4<br>Line 5");
-        assert_eq!(lines, vec!["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"]);
+        assert_eq!(
+            lines,
+            vec!["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"]
+        );
     }
 
     #[test]

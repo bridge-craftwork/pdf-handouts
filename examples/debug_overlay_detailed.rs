@@ -15,8 +15,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source_doc = Document::load(source_path)?;
     let watermark_doc = Document::load(watermark_path)?;
 
-    println!("Source doc: {} objects, max_id: {}", source_doc.objects.len(), source_doc.max_id);
-    println!("Watermark doc: {} objects, max_id: {}", watermark_doc.objects.len(), watermark_doc.max_id);
+    println!(
+        "Source doc: {} objects, max_id: {}",
+        source_doc.objects.len(),
+        source_doc.max_id
+    );
+    println!(
+        "Watermark doc: {} objects, max_id: {}",
+        watermark_doc.objects.len(),
+        watermark_doc.max_id
+    );
 
     let source_pages = source_doc.get_pages();
     let watermark_pages = watermark_doc.get_pages();
@@ -60,10 +68,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, (_page_num, source_page_id)) in source_pages.iter().enumerate() {
         let watermark_page_num = (i + 1) as u32;
 
-        println!("\nProcessing page {} (source page ID: {:?})", watermark_page_num, source_page_id);
+        println!(
+            "\nProcessing page {} (source page ID: {:?})",
+            watermark_page_num, source_page_id
+        );
 
         // Get watermark content refs
-        if let Some(watermark_content_refs) = get_page_content_refs(&watermark_doc, watermark_page_num, &id_map)? {
+        if let Some(watermark_content_refs) =
+            get_page_content_refs(&watermark_doc, watermark_page_num, &id_map)?
+        {
             println!("  Watermark content refs: {:?}", watermark_content_refs);
 
             // Get source page
@@ -96,7 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Updated content: {:?}", updated_content);
             }
         } else {
-            println!("  WARNING: No watermark content found for page {}", watermark_page_num);
+            println!(
+                "  WARNING: No watermark content found for page {}",
+                watermark_page_num
+            );
         }
     }
 
@@ -132,9 +148,11 @@ fn renumber_object_references(object: &Object, id_map: &HashMap<ObjectId, Object
                 Object::Reference(*old_id)
             }
         }
-        Object::Array(arr) => {
-            Object::Array(arr.iter().map(|obj| renumber_object_references(obj, id_map)).collect())
-        }
+        Object::Array(arr) => Object::Array(
+            arr.iter()
+                .map(|obj| renumber_object_references(obj, id_map))
+                .collect(),
+        ),
         Object::Dictionary(dict) => {
             let mut new_dict = lopdf::Dictionary::new();
             for (key, value) in dict.iter() {

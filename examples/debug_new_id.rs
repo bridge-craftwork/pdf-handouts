@@ -1,6 +1,6 @@
 //! Debug new_object_id behavior
 
-use lopdf::{Document, Object, Dictionary};
+use lopdf::{Dictionary, Document, Object};
 use std::collections::BTreeMap;
 
 fn main() {
@@ -21,7 +21,10 @@ fn main() {
         collected.insert((i, 0), Object::Dictionary(Dictionary::new()));
     }
 
-    println!("\nAdding {} collected objects via extend...", collected.len());
+    println!(
+        "\nAdding {} collected objects via extend...",
+        collected.len()
+    );
     doc.objects.extend(collected);
     println!("  max_id: {} (should be 20, but is it?)", doc.max_id);
     println!("  objects.len(): {}", doc.objects.len());

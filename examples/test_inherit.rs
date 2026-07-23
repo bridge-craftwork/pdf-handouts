@@ -1,6 +1,6 @@
 //! Test inherited resources
 
-use lopdf::{Document, Object, Dictionary};
+use lopdf::{Dictionary, Document, Object};
 use std::path::Path;
 
 fn get_inherited_resources(doc: &Document, parent_id: (u32, u16)) -> Dictionary {
@@ -19,10 +19,8 @@ fn get_inherited_resources(doc: &Document, parent_id: (u32, u16)) -> Dictionary 
         }
 
         // Not found here, check grandparent
-        if let Ok(grandparent) = parent_dict.get(b"Parent") {
-            if let Object::Reference(grandparent_id) = grandparent {
-                return get_inherited_resources(doc, *grandparent_id);
-            }
+        if let Ok(Object::Reference(grandparent_id)) = parent_dict.get(b"Parent") {
+            return get_inherited_resources(doc, *grandparent_id);
         }
     }
 
@@ -45,15 +43,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("No direct Resources");
 
                 // Try inherited
-                if let Ok(parent) = page_dict.get(b"Parent") {
-                    if let Object::Reference(parent_id) = parent {
-                        let inherited = get_inherited_resources(&doc, *parent_id);
-                        println!("Inherited Resources keys: {:?}", inherited.iter().map(|(k, _)| String::from_utf8_lossy(k).to_string()).collect::<Vec<_>>());
+                if let Ok(Object::Reference(parent_id)) = page_dict.get(b"Parent") {
+                    let inherited = get_inherited_resources(&doc, *parent_id);
+                    println!(
+                        "Inherited Resources keys: {:?}",
+                        inherited
+                            .iter()
+                            .map(|(k, _)| String::from_utf8_lossy(k).to_string())
+                            .collect::<Vec<_>>()
+                    );
 
-                        // Check for Font
-                        if let Ok(font) = inherited.get(b"Font") {
-                            println!("Fonts: {:?}", font);
-                        }
+                    // Check for Font
+                    if let Ok(font) = inherited.get(b"Font") {
+                        println!("Fonts: {:?}", font);
                     }
                 }
             }

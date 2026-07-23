@@ -1,7 +1,7 @@
 //! Demonstrate watermark PDF creation
 
-use pdf_handouts::pdf::create::{WatermarkOptions, create_watermark_pdf};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::create::{create_watermark_pdf, WatermarkOptions};
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a simple watermark PDF
     let output = PathBuf::from("target/demo_watermark.pdf");
-    
+
     let options = WatermarkOptions {
         title: Some("Bridge Class Handout".to_string()),
         footer_left: Some("Stoneridge Creek".to_string()),
@@ -25,10 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     create_watermark_pdf(&output, &options)?;
-    
+
     println!("Created watermark PDF: {}", output.display());
     println!("\nOpen it with:");
     println!("  open {}", output.display());
-    
+
     Ok(())
 }

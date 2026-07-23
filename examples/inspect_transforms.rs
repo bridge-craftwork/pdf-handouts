@@ -23,7 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Ok(Object::Stream(stream)) = doc.get_object(*hf_id) {
                             // Get the Matrix from the XObject
                             if let Ok(Object::Array(matrix)) = stream.dict.get(b"Matrix") {
-                                let nums: Vec<String> = matrix.iter().map(|o| format!("{:?}", o)).collect();
+                                let nums: Vec<String> =
+                                    matrix.iter().map(|o| format!("{:?}", o)).collect();
                                 println!("Page {}: Matrix = [{}]", page_num, nums.join(", "));
                             } else {
                                 println!("Page {}: No Matrix (identity)", page_num);

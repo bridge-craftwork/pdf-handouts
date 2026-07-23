@@ -1,7 +1,7 @@
 //! Demonstrates multi-line footer support with various line break syntaxes
 
-use pdf_handouts::pdf::{create_watermark_pdf, WatermarkOptions};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::{create_watermark_pdf, WatermarkOptions};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         title: Some("Bridge Class Handout".to_string()),
         footer_left: Some("Stoneridge Creek|Community Center".to_string()),
         footer_center: Some("Presented by:[br]Rick Wilson".to_string()),
-        footer_right: None,  // Page numbers and date will appear here automatically
+        footer_right: None, // Page numbers and date will appear here automatically
         date: Some(NaiveDate::from_ymd_opt(2026, 1, 14).unwrap()),
         show_page_numbers: true,
         show_total_page_count: true,

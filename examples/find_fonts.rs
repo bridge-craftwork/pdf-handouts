@@ -10,11 +10,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Looking for Font objects...");
     for (id, obj) in &doc.objects {
         if let Object::Dictionary(dict) = obj {
-            if let Ok(obj_type) = dict.get(b"Type") {
-                if let Object::Name(name) = obj_type {
-                    if name == b"Font" {
-                        println!("  Font {:?}: {:?}", id, dict);
-                    }
+            if let Ok(Object::Name(name)) = dict.get(b"Type") {
+                if name == b"Font" {
+                    println!("  Font {:?}: {:?}", id, dict);
                 }
             }
         }

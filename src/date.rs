@@ -3,8 +3,8 @@
 //! Provides flexible date expression parsing compatible with the original PowerShell
 //! Get-ReportDate function.
 
-use chrono::{Datelike, Local, NaiveDate, Weekday};
 use crate::error::{Error, Result};
+use chrono::{Datelike, Local, NaiveDate, Weekday};
 
 /// Date expression types
 #[derive(Debug, Clone, PartialEq)]
@@ -57,7 +57,9 @@ pub fn parse_date_expression(expr: &str) -> Result<DateExpression> {
     if let Some((day_str, offset_str)) = expr.split_once('+') {
         // Has offset: "Tuesday+3"
         let day = parse_weekday(day_str.trim())?;
-        let offset: u32 = offset_str.trim().parse()
+        let offset: u32 = offset_str
+            .trim()
+            .parse()
             .map_err(|_| Error::InvalidDateExpression(format!("Invalid offset: {}", offset_str)))?;
         return Ok(DateExpression::DayOfWeek { day, offset });
     } else {
@@ -67,7 +69,10 @@ pub fn parse_date_expression(expr: &str) -> Result<DateExpression> {
         }
     }
 
-    Err(Error::InvalidDateExpression(format!("Unable to parse date expression: {}", expr)))
+    Err(Error::InvalidDateExpression(format!(
+        "Unable to parse date expression: {}",
+        expr
+    )))
 }
 
 /// Parse a weekday name (case-insensitive)
@@ -81,7 +86,10 @@ fn parse_weekday(s: &str) -> Result<Weekday> {
         "friday" | "fri" => Ok(Weekday::Fri),
         "saturday" | "sat" => Ok(Weekday::Sat),
         "sunday" | "sun" => Ok(Weekday::Sun),
-        _ => Err(Error::InvalidDateExpression(format!("Unknown weekday: {}", s))),
+        _ => Err(Error::InvalidDateExpression(format!(
+            "Unknown weekday: {}",
+            s
+        ))),
     }
 }
 
@@ -91,9 +99,7 @@ pub fn resolve_date(expr: &DateExpression) -> Option<NaiveDate> {
         DateExpression::None => None,
         DateExpression::Today => Some(Local::now().date_naive()),
         DateExpression::Explicit(date) => Some(*date),
-        DateExpression::DayOfWeek { day, offset } => {
-            Some(find_next_weekday(*day, *offset))
-        }
+        DateExpression::DayOfWeek { day, offset } => Some(find_next_weekday(*day, *offset)),
     }
 }
 

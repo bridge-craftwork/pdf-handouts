@@ -1,7 +1,10 @@
 //! Demonstrates the full workflow: merge PDFs, create watermark, and overlay
 
-use pdf_handouts::pdf::{merge_pdfs, create_watermark_pdf, overlay_watermark, count_pages, MergeOptions, WatermarkOptions};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::{
+    count_pages, create_watermark_pdf, merge_pdfs, overlay_watermark, MergeOptions,
+    WatermarkOptions,
+};
 use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,7 +83,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 4: Overlay watermark
     overlay_watermark(merged_path, watermark_path, final_output_path)?;
     let final_page_count = count_pages(final_output_path)?;
-    println!("  ✓ Final PDF has {} pages with headers/footers", final_page_count);
+    println!(
+        "  ✓ Final PDF has {} pages with headers/footers",
+        final_page_count
+    );
     println!("  → Saved to: {}", final_output_path.display());
 
     println!("\n=== Demo Complete ===");

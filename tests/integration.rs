@@ -1,9 +1,12 @@
 //! Integration tests for PDF handouts library
 
-use pdf_handouts::pdf::{count_pages, merge_pdfs, create_watermark_pdf, overlay_watermark, MergeOptions, WatermarkOptions};
+use chrono::NaiveDate;
+use pdf_handouts::pdf::{
+    count_pages, create_watermark_pdf, merge_pdfs, overlay_watermark, MergeOptions,
+    WatermarkOptions,
+};
 use std::path::PathBuf;
 use tempfile::TempDir;
-use chrono::NaiveDate;
 
 /// Test helper to get the path to test fixtures
 fn fixture_path(name: &str) -> PathBuf {
@@ -36,8 +39,8 @@ fn test_count_pages_real_pdfs() {
             continue;
         }
 
-        let page_count = count_pages(&path)
-            .expect(&format!("Failed to count pages in {}", filename));
+        let page_count =
+            count_pages(&path).unwrap_or_else(|_| panic!("Failed to count pages in {}", filename));
 
         assert_eq!(
             page_count, expected_pages,
@@ -88,8 +91,7 @@ fn test_merge_real_pdfs_page_count() {
     assert!(output_path.exists(), "Merged PDF was not created");
 
     // Count pages in merged PDF
-    let merged_page_count = count_pages(&output_path)
-        .expect("Failed to count pages in merged PDF");
+    let merged_page_count = count_pages(&output_path).expect("Failed to count pages in merged PDF");
 
     assert_eq!(
         merged_page_count, expected_total,
@@ -97,8 +99,11 @@ fn test_merge_real_pdfs_page_count() {
         expected_total, merged_page_count
     );
 
-    println!("✓ Successfully merged {} PDFs into {} pages",
-             input_files.len(), merged_page_count);
+    println!(
+        "✓ Successfully merged {} PDFs into {} pages",
+        input_files.len(),
+        merged_page_count
+    );
 }
 
 #[test]
@@ -136,9 +141,12 @@ fn test_merge_preserves_content_order() {
     assert!(output_path.exists(), "Merged PDF was not created");
 
     // Expected: 1 + 1 + 6 = 8 pages
-    let page_count = count_pages(&output_path)
-        .expect("Failed to count pages");
-    assert_eq!(page_count, expected_total, "Merged PDF should have {} pages", expected_total);
+    let page_count = count_pages(&output_path).expect("Failed to count pages");
+    assert_eq!(
+        page_count, expected_total,
+        "Merged PDF should have {} pages",
+        expected_total
+    );
 
     println!("✓ Page order preserved in merged PDF");
 }
@@ -230,8 +238,7 @@ fn test_full_workflow_merge_watermark_overlay() {
     assert!(merged_path.exists(), "Merged PDF was not created");
 
     // Verify merged page count
-    let merged_page_count = count_pages(&merged_path)
-        .expect("Failed to count pages in merged PDF");
+    let merged_page_count = count_pages(&merged_path).expect("Failed to count pages in merged PDF");
     assert_eq!(
         merged_page_count, expected_total,
         "Merged PDF should have {} pages, got {}",
@@ -261,8 +268,8 @@ fn test_full_workflow_merge_watermark_overlay() {
     assert!(watermark_path.exists(), "Watermark PDF was not created");
 
     // Verify watermark page count matches merged PDF
-    let watermark_page_count = count_pages(&watermark_path)
-        .expect("Failed to count pages in watermark PDF");
+    let watermark_page_count =
+        count_pages(&watermark_path).expect("Failed to count pages in watermark PDF");
     assert_eq!(
         watermark_page_count, merged_page_count,
         "Watermark PDF should have same page count as merged PDF"
@@ -274,21 +281,34 @@ fn test_full_workflow_merge_watermark_overlay() {
     // Step 4: Overlay watermark onto merged PDF
     overlay_watermark(&merged_path, &watermark_path, &final_output_path)
         .expect("Failed to overlay watermark");
-    assert!(final_output_path.exists(), "Final output PDF was not created");
+    assert!(
+        final_output_path.exists(),
+        "Final output PDF was not created"
+    );
 
     // Verify final page count
-    let final_page_count = count_pages(&final_output_path)
-        .expect("Failed to count pages in final PDF");
+    let final_page_count =
+        count_pages(&final_output_path).expect("Failed to count pages in final PDF");
     assert_eq!(
         final_page_count, expected_total,
         "Final PDF should have {} pages, got {}",
         expected_total, final_page_count
     );
-    println!("  ✓ Final PDF has {} pages with headers/footers", final_page_count);
+    println!(
+        "  ✓ Final PDF has {} pages with headers/footers",
+        final_page_count
+    );
 
     println!("\n=== Full Workflow Test: SUCCESS ===");
-    println!("✓ Merged {} PDFs ({} pages)", input_files.len(), merged_page_count);
+    println!(
+        "✓ Merged {} PDFs ({} pages)",
+        input_files.len(),
+        merged_page_count
+    );
     println!("✓ Created watermark with title and multi-line footers");
     println!("✓ Overlaid watermark successfully");
-    println!("✓ Final output: {} pages with headers/footers", final_page_count);
+    println!(
+        "✓ Final output: {} pages with headers/footers",
+        final_page_count
+    );
 }

@@ -7,15 +7,15 @@ fn main() {
         eprintln!("Usage: inspect_resources <pdf_file>");
         return;
     }
-    
+
     let doc = Document::load(&args[1]).expect("Failed to load PDF");
     let pages = doc.get_pages();
-    
+
     println!("Total pages: {}", pages.len());
-    
+
     for (page_num, page_id) in pages {
         println!("\n=== Page {} (ID: {:?}) ===", page_num, page_id);
-        
+
         if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
             // Check Resources
             if let Ok(resources) = page_dict.get(b"Resources") {
@@ -23,12 +23,12 @@ fn main() {
                     Object::Reference(id) => {
                         println!("Resources: reference to {:?}", id);
                         if let Ok(Object::Dictionary(res_dict)) = doc.get_object(*id) {
-                            print_resources(&res_dict);
+                            print_resources(res_dict);
                         }
                     }
                     Object::Dictionary(res_dict) => {
                         println!("Resources: inline dictionary");
-                        print_resources(&res_dict);
+                        print_resources(res_dict);
                     }
                     _ => println!("Resources: {:?}", resources),
                 }

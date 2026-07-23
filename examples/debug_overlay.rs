@@ -1,9 +1,9 @@
 //! Debug overlay function to inspect what's happening
 
-use pdf_handouts::pdf::{merge_pdfs, create_watermark_pdf, MergeOptions, WatermarkOptions};
 use chrono::NaiveDate;
-use std::path::{Path, PathBuf};
 use lopdf::{Document, Object};
+use pdf_handouts::pdf::{create_watermark_pdf, merge_pdfs, MergeOptions, WatermarkOptions};
+use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Debug Overlay Investigation ===\n");
@@ -65,7 +65,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nStep 3: Inspecting watermark PDF structure...");
     let watermark_doc = Document::load(watermark_path)?;
 
-    println!("  Watermark PDF has {} objects", watermark_doc.objects.len());
+    println!(
+        "  Watermark PDF has {} objects",
+        watermark_doc.objects.len()
+    );
     println!("  Max ID: {}", watermark_doc.max_id);
 
     let watermark_pages = watermark_doc.get_pages();
@@ -85,9 +88,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Ok(content_obj) = watermark_doc.get_object(*content_id) {
                         match content_obj {
                             Object::Stream(stream) => {
-                                println!("    Content stream length: {} bytes", stream.content.len());
-                                println!("    First 100 bytes: {:?}",
-                                    String::from_utf8_lossy(&stream.content[..stream.content.len().min(100)]));
+                                println!(
+                                    "    Content stream length: {} bytes",
+                                    stream.content.len()
+                                );
+                                println!(
+                                    "    First 100 bytes: {:?}",
+                                    String::from_utf8_lossy(
+                                        &stream.content[..stream.content.len().min(100)]
+                                    )
+                                );
                             }
                             _ => println!("    Content object is not a stream: {:?}", content_obj),
                         }

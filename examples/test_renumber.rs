@@ -31,17 +31,27 @@ fn main() {
     println!("max_id: {}", doc2.max_id);
 
     let max_id_after_doc1 = doc1.max_id + 1;
-    println!("\n=== Document 2 (after renumbering with offset {}) ===", max_id_after_doc1);
+    println!(
+        "\n=== Document 2 (after renumbering with offset {}) ===",
+        max_id_after_doc1
+    );
     doc2.renumber_objects_with(max_id_after_doc1);
     let pages2_after = doc2.get_pages();
     println!("Pages: {:?}", pages2_after);
     println!("max_id: {}", doc2.max_id);
 
     println!("\n=== Summary ===");
-    println!("Doc1 pages: {:?}", pages1_after.iter().map(|(_, id)| id).collect::<Vec<_>>());
-    println!("Doc2 pages: {:?}", pages2_after.iter().map(|(_, id)| id).collect::<Vec<_>>());
+    println!(
+        "Doc1 pages: {:?}",
+        pages1_after.values().collect::<Vec<_>>()
+    );
+    println!(
+        "Doc2 pages: {:?}",
+        pages2_after.values().collect::<Vec<_>>()
+    );
 
-    let all_page_ids: Vec<_> = pages1_after.iter()
+    let all_page_ids: Vec<_> = pages1_after
+        .iter()
         .chain(pages2_after.iter())
         .map(|(_, id)| id)
         .collect();

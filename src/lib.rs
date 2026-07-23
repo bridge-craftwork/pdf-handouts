@@ -25,10 +25,10 @@
 //! merge_pdfs(&options).expect("Failed to merge PDFs");
 //! ```
 
-pub mod error;
-pub mod pdf;
 pub mod date;
+pub mod error;
 pub mod layout;
+pub mod pdf;
 
 // Re-export commonly used items
 pub use error::{Error, Result};

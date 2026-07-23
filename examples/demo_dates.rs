@@ -1,6 +1,6 @@
 //! Demonstrate date parsing functionality
 
-use pdf_handouts::date::{parse_date_expression, resolve_date, format_date};
+use pdf_handouts::date::{format_date, parse_date_expression, resolve_date};
 
 fn main() {
     println!("=== Date Parsing Demo ===\n");

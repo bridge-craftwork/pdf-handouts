@@ -4,7 +4,7 @@ use lopdf::Document;
 use std::path::Path;
 
 fn main() {
-    let files = vec![
+    let files = [
         "tests/fixtures/real-world/1. NT Ladder - Google Docs.pdf",
         "tests/fixtures/real-world/2. NT Ladder Practice Sheet.pdf",
         "tests/fixtures/real-world/3. ABS4-2 Jacoby Transfers Handouts.pdf",
@@ -26,15 +26,18 @@ fn main() {
         println!("Before renumber:");
         println!("  max_id: {}", doc.max_id);
         let pages_before = doc.get_pages();
-        println!("  pages: {:?}", pages_before.iter().map(|(_, id)| id).collect::<Vec<_>>());
+        println!("  pages: {:?}", pages_before.values().collect::<Vec<_>>());
 
         doc.renumber_objects_with(max_id);
         max_id = doc.max_id + 1;
 
-        println!("After renumber (offset {}):", max_id - 1 - doc.max_id + doc.max_id);
+        println!(
+            "After renumber (offset {}):",
+            max_id - 1 - doc.max_id + doc.max_id
+        );
         println!("  max_id: {}", doc.max_id);
         let pages_after = doc.get_pages();
-        let page_ids: Vec<_> = pages_after.iter().map(|(_, id)| *id).collect();
+        let page_ids: Vec<_> = pages_after.values().copied().collect();
         println!("  pages: {:?}", page_ids);
 
         all_page_ids.extend(page_ids);

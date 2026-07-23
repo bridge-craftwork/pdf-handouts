@@ -1,6 +1,6 @@
 //! Test prepending headers/footers BEFORE the Google Docs content
 
-use lopdf::{Document, Object, Dictionary, Stream};
+use lopdf::{Dictionary, Document, Object, Stream};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,7 +87,10 @@ Q
                     page_dict.set("Contents", Object::Array(content_array));
                 }
                 _ => {
-                    page_dict.set("Contents", Object::Array(vec![Object::Reference(header_stream_id)]));
+                    page_dict.set(
+                        "Contents",
+                        Object::Array(vec![Object::Reference(header_stream_id)]),
+                    );
                 }
             }
         }
