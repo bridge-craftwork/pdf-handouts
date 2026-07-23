@@ -43,7 +43,7 @@ fn main() {
                             } else {
                                 println!(
                                     "  Content preview: {}...",
-                                    &content.chars().take(200).collect::<String>()
+                                    content.chars().take(200).collect::<String>()
                                 );
                             }
                         }
