@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 fn main() {
-    let files = vec![
+    let files = [
         "tests/fixtures/real-world/1. NT Ladder - Google Docs.pdf",
         "tests/fixtures/real-world/2. NT Ladder Practice Sheet.pdf",
     ];
@@ -25,13 +25,17 @@ fn main() {
         max_id = doc.max_id + 1;
 
         let pages = doc.get_pages();
-        let page_ids: Vec<_> = pages.iter().map(|(_, id)| *id).collect();
+        let page_ids: Vec<_> = pages.values().copied().collect();
         println!("Page IDs after renumber: {:?}", page_ids);
 
         // Check if page objects exist
         for page_id in &page_ids {
             if let Some(obj) = doc.objects.get(page_id) {
-                println!("  Page {:?} exists in doc.objects: {:?}", page_id, matches!(obj, lopdf::Object::Dictionary(_)));
+                println!(
+                    "  Page {:?} exists in doc.objects: {:?}",
+                    page_id,
+                    matches!(obj, lopdf::Object::Dictionary(_))
+                );
             } else {
                 println!("  Page {:?} NOT FOUND in doc.objects!", page_id);
             }

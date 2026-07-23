@@ -1,7 +1,7 @@
 //! Test adding headers/footers to a single PDF (simpler test case)
 
-use pdf_handouts::pdf::{add_headers_footers, HeaderFooterOptions, MaskOptions};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::{add_headers_footers, HeaderFooterOptions, MaskOptions};
 use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

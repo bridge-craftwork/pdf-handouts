@@ -1,7 +1,9 @@
 //! Demo of direct header/footer writing (new approach)
 
-use pdf_handouts::pdf::{merge_pdfs, add_headers_footers, MergeOptions, HeaderFooterOptions, FontSpec, MaskOptions};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::{
+    add_headers_footers, merge_pdfs, FontSpec, HeaderFooterOptions, MaskOptions, MergeOptions,
+};
 use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -71,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         footer_center: Some("Presented by:|Rick Wilson".to_string()),
         footer_right: Some("Page [page] of [pages]|[date]".to_string()),
         date: Some(NaiveDate::from_ymd_opt(2026, 1, 14).unwrap()),
-        show_page_numbers: false, // Using [page] placeholder instead
+        show_page_numbers: false,     // Using [page] placeholder instead
         show_total_page_count: false, // Using [pages] placeholder instead
         title_font_size: 24.0,
         footer_font_size: 14.0,

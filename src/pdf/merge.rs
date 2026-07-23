@@ -1,9 +1,9 @@
 //! PDF merging functionality using lopdf
 
+use crate::error::{Error, Result};
+use lopdf::{Dictionary, Document, Object, ObjectId};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use lopdf::{Document, Object, ObjectId, Dictionary};
-use crate::error::{Error, Result};
 
 /// Options for merging PDFs
 #[derive(Debug, Clone)]
@@ -75,12 +75,12 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
         // Before collecting pages, ensure each page has its own Resources
         // (copy inherited Resources from parent if needed)
         let pages = doc.get_pages();
-        for (_page_num, page_id) in &pages {
+        for page_id in pages.values() {
             copy_inherited_resources_to_page(&mut doc, *page_id);
         }
 
         // Collect page IDs from this document
-        page_ids.extend(pages.into_iter().map(|(_, id)| id));
+        page_ids.extend(pages.into_values());
 
         // Collect all objects from this document
         objects.extend(doc.objects);
@@ -102,10 +102,7 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
     let pages_id = merged_doc.new_object_id();
 
     // Create Kids array with all page references
-    let kids: Vec<Object> = page_ids
-        .iter()
-        .map(|&id| Object::Reference(id))
-        .collect();
+    let kids: Vec<Object> = page_ids.iter().map(|&id| Object::Reference(id)).collect();
 
     // Create Pages object
     let mut pages_object = Dictionary::new();
@@ -120,18 +117,22 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
     catalog.set("Pages", Object::Reference(pages_id));
 
     // Insert catalog and pages into merged document
-    merged_doc.objects.insert(catalog_id, Object::Dictionary(catalog));
-    merged_doc.objects.insert(pages_id, Object::Dictionary(pages_object));
+    merged_doc
+        .objects
+        .insert(catalog_id, Object::Dictionary(catalog));
+    merged_doc
+        .objects
+        .insert(pages_id, Object::Dictionary(pages_object));
 
     // Set the catalog as the root
-    merged_doc.trailer.set("Root", Object::Reference(catalog_id));
+    merged_doc
+        .trailer
+        .set("Root", Object::Reference(catalog_id));
 
     // Update parent references for all pages
     for &page_id in &page_ids {
-        if let Ok(page_object) = merged_doc.get_object_mut(page_id) {
-            if let Object::Dictionary(ref mut dict) = page_object {
-                dict.set("Parent", Object::Reference(pages_id));
-            }
+        if let Ok(Object::Dictionary(ref mut dict)) = merged_doc.get_object_mut(page_id) {
+            dict.set("Parent", Object::Reference(pages_id));
         }
     }
 
@@ -221,7 +222,9 @@ pub fn overlay_watermark(
         let watermark_page_num = (i + 1) as u32;
 
         // Get the watermark page's content references and resources (now with new IDs)
-        if let Some((watermark_content_refs, watermark_resources)) = get_page_content_and_resources(&watermark_doc, watermark_page_num, &id_map)? {
+        if let Some((watermark_content_refs, watermark_resources)) =
+            get_page_content_and_resources(&watermark_doc, watermark_page_num, &id_map)?
+        {
             // Get the source page object
             let page_obj = source_doc.get_object_mut(*source_page_id)?;
 
@@ -260,7 +263,10 @@ pub fn overlay_watermark(
 }
 
 /// Renumber all object references in an object
-fn renumber_object_references(object: &Object, id_map: &std::collections::HashMap<ObjectId, ObjectId>) -> Object {
+fn renumber_object_references(
+    object: &Object,
+    id_map: &std::collections::HashMap<ObjectId, ObjectId>,
+) -> Object {
     match object {
         Object::Reference(old_id) => {
             if let Some(new_id) = id_map.get(old_id) {
@@ -269,9 +275,11 @@ fn renumber_object_references(object: &Object, id_map: &std::collections::HashMa
                 Object::Reference(*old_id)
             }
         }
-        Object::Array(arr) => {
-            Object::Array(arr.iter().map(|obj| renumber_object_references(obj, id_map)).collect())
-        }
+        Object::Array(arr) => Object::Array(
+            arr.iter()
+                .map(|obj| renumber_object_references(obj, id_map))
+                .collect(),
+        ),
         Object::Dictionary(dict) => {
             let mut new_dict = Dictionary::new();
             for (key, value) in dict.iter() {
@@ -350,15 +358,17 @@ fn merge_resources(page_dict: &mut Dictionary, watermark_resources: &Object) -> 
 
     // If existing resources is a dictionary, merge in watermark resources
     if let (Object::Dictionary(ref mut merged_dict), Object::Dictionary(watermark_dict)) =
-        (&mut merged_resources, watermark_resources) {
-
+        (&mut merged_resources, watermark_resources)
+    {
         // Merge each resource type (Font, ExtGState, XObject, etc.)
         for (key, value) in watermark_dict.iter() {
             if let Ok(existing_value) = merged_dict.get(key) {
                 // If both have this resource type, merge the subdictionaries
-                if let (Object::Dictionary(existing_subdict), Object::Dictionary(watermark_subdict)) =
-                    (existing_value.clone(), value) {
-
+                if let (
+                    Object::Dictionary(existing_subdict),
+                    Object::Dictionary(watermark_subdict),
+                ) = (existing_value.clone(), value)
+                {
                     let mut merged_subdict = existing_subdict.clone();
                     // Merge the subdictionary entries
                     for (subkey, subvalue) in watermark_subdict.iter() {
@@ -404,12 +414,8 @@ fn copy_inherited_resources_to_page(doc: &mut Document, page_id: ObjectId) {
     // Get inherited Resources from parent
     let inherited_resources = {
         if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
-            if let Ok(parent) = page_dict.get(b"Parent") {
-                if let Object::Reference(parent_id) = parent {
-                    get_inherited_resources_from_tree(doc, *parent_id)
-                } else {
-                    None
-                }
+            if let Ok(Object::Reference(parent_id)) = page_dict.get(b"Parent") {
+                get_inherited_resources_from_tree(doc, *parent_id)
             } else {
                 None
             }
@@ -420,10 +426,8 @@ fn copy_inherited_resources_to_page(doc: &mut Document, page_id: ObjectId) {
 
     // Set the inherited Resources on the page
     if let Some(resources) = inherited_resources {
-        if let Ok(page_obj) = doc.get_object_mut(page_id) {
-            if let Object::Dictionary(ref mut page_dict) = page_obj {
-                page_dict.set("Resources", Object::Dictionary(resources));
-            }
+        if let Ok(Object::Dictionary(ref mut page_dict)) = doc.get_object_mut(page_id) {
+            page_dict.set("Resources", Object::Dictionary(resources));
         }
     }
 }
@@ -445,10 +449,8 @@ fn get_inherited_resources_from_tree(doc: &Document, node_id: ObjectId) -> Optio
         }
 
         // Not found here, check parent
-        if let Ok(parent) = node_dict.get(b"Parent") {
-            if let Object::Reference(parent_id) = parent {
-                return get_inherited_resources_from_tree(doc, *parent_id);
-            }
+        if let Ok(Object::Reference(parent_id)) = node_dict.get(b"Parent") {
+            return get_inherited_resources_from_tree(doc, *parent_id);
         }
     }
 
@@ -463,10 +465,7 @@ mod tests {
     #[test]
     fn test_merge_options_creation() {
         let options = MergeOptions {
-            input_paths: vec![
-                PathBuf::from("test1.pdf"),
-                PathBuf::from("test2.pdf"),
-            ],
+            input_paths: vec![PathBuf::from("test1.pdf"), PathBuf::from("test2.pdf")],
             output_path: PathBuf::from("merged.pdf"),
         };
 

@@ -15,7 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Save decompressed version
     let decompressed_path = Path::new("target/debug_watermark_decompressed.pdf");
     watermark_doc.save(decompressed_path)?;
-    println!("Saved decompressed watermark to: {}", decompressed_path.display());
+    println!(
+        "Saved decompressed watermark to: {}",
+        decompressed_path.display()
+    );
 
     // Now inspect the content
     let pages = watermark_doc.get_pages();

@@ -2,16 +2,21 @@
 //!
 //! A command-line tool for merging PDFs and adding headers/footers.
 
+// cmd_headers and cmd_merge take one parameter per clap flag (16 apiece), which
+// trips clippy's 7-argument limit. Threading an options struct through instead is
+// the real fix, but that's a refactor of the CLI surface rather than a lint fix —
+// kept out of the PR that introduced CI.
+#![allow(clippy::too_many_arguments)]
+
 use clap::{Parser, Subcommand};
 use glob::glob;
 use std::path::PathBuf;
 use std::process;
 
-use pdf_handouts::pdf::{
-    merge_pdfs, add_headers_footers,
-    MergeOptions, HeaderFooterOptions, FontSpec, MaskOptions,
-};
 use pdf_handouts::date::{parse_date_expression, resolve_date};
+use pdf_handouts::pdf::{
+    add_headers_footers, merge_pdfs, FontSpec, HeaderFooterOptions, MaskOptions, MergeOptions,
+};
 
 /// PDF Handouts - Merge PDFs and add headers/footers
 #[derive(Parser)]
@@ -239,38 +244,82 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Merge { inputs, output, open } => {
-            cmd_merge(inputs, output, open)
-        }
+        Commands::Merge {
+            inputs,
+            output,
+            open,
+        } => cmd_merge(inputs, output, open),
         Commands::Headers {
-            input, output, title, footer_left, footer_center, footer_right,
-            date, font, header_font, footer_font,
-            mask_header, mask_footer, mask_header_all, mask_footer_all, mask_color,
+            input,
+            output,
+            title,
+            footer_left,
+            footer_center,
+            footer_right,
+            date,
+            font,
+            header_font,
+            footer_font,
+            mask_header,
+            mask_footer,
+            mask_header_all,
+            mask_footer_all,
+            mask_color,
             open,
-        } => {
-            cmd_headers(
-                input, output, title, footer_left, footer_center, footer_right,
-                date, font, header_font, footer_font,
-                mask_header, mask_footer, mask_header_all, mask_footer_all, mask_color,
-                open,
-            )
-        }
+        } => cmd_headers(
+            input,
+            output,
+            title,
+            footer_left,
+            footer_center,
+            footer_right,
+            date,
+            font,
+            header_font,
+            footer_font,
+            mask_header,
+            mask_footer,
+            mask_header_all,
+            mask_footer_all,
+            mask_color,
+            open,
+        ),
         Commands::Build {
-            inputs, output, title, footer_left, footer_center, footer_right,
-            date, font, header_font, footer_font,
-            mask_header, mask_footer, mask_header_all, mask_footer_all, mask_color,
+            inputs,
+            output,
+            title,
+            footer_left,
+            footer_center,
+            footer_right,
+            date,
+            font,
+            header_font,
+            footer_font,
+            mask_header,
+            mask_footer,
+            mask_header_all,
+            mask_footer_all,
+            mask_color,
             open,
-        } => {
-            cmd_build(
-                inputs, output, title, footer_left, footer_center, footer_right,
-                date, font, header_font, footer_font,
-                mask_header, mask_footer, mask_header_all, mask_footer_all, mask_color,
-                open,
-            )
-        }
-        Commands::Info { input } => {
-            cmd_info(input)
-        }
+        } => cmd_build(
+            inputs,
+            output,
+            title,
+            footer_left,
+            footer_center,
+            footer_right,
+            date,
+            font,
+            header_font,
+            footer_font,
+            mask_header,
+            mask_footer,
+            mask_header_all,
+            mask_footer_all,
+            mask_color,
+            open,
+        ),
+        Commands::Info { input } => cmd_info(input),
     };
 
     if let Err(e) = result {
@@ -315,15 +364,11 @@ fn expand_globs(patterns: Vec<String>) -> Result<Vec<PathBuf>, Box<dyn std::erro
 fn open_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(path)
-            .spawn()?;
+        std::process::Command::new("open").arg(path).spawn()?;
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()?;
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
     }
     #[cfg(target_os = "windows")]
     {
@@ -335,7 +380,11 @@ fn open_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Merge multiple PDFs into one
-fn cmd_merge(inputs: Vec<String>, output: PathBuf, open: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_merge(
+    inputs: Vec<String>,
+    output: PathBuf,
+    open: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Expand glob patterns
     let inputs = expand_globs(inputs)?;
 
@@ -410,13 +459,17 @@ fn cmd_headers(
     }
 
     // Parse date expression
-    let resolved_date = date.as_deref()
+    let resolved_date = date
+        .as_deref()
         .and_then(|d| parse_date_expression(d).ok())
         .and_then(|expr| resolve_date(&expr));
 
     // Parse font specifications
     let base_font = font.as_deref().map(FontSpec::parse);
-    let header_spec = header_font.as_deref().map(FontSpec::parse).or_else(|| base_font.clone());
+    let header_spec = header_font
+        .as_deref()
+        .map(FontSpec::parse)
+        .or_else(|| base_font.clone());
     let footer_spec = footer_font.as_deref().map(FontSpec::parse).or(base_font);
 
     // Build mask options
@@ -499,13 +552,17 @@ fn cmd_build(
     merge_pdfs(&merge_options)?;
 
     // Parse date expression
-    let resolved_date = date.as_deref()
+    let resolved_date = date
+        .as_deref()
         .and_then(|d| parse_date_expression(d).ok())
         .and_then(|expr| resolve_date(&expr));
 
     // Parse font specifications
     let base_font = font.as_deref().map(FontSpec::parse);
-    let header_spec = header_font.as_deref().map(FontSpec::parse).or_else(|| base_font.clone());
+    let header_spec = header_font
+        .as_deref()
+        .map(FontSpec::parse)
+        .or_else(|| base_font.clone());
     let footer_spec = footer_font.as_deref().map(FontSpec::parse).or(base_font);
 
     // Build mask options

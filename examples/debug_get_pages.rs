@@ -29,7 +29,7 @@ fn main() {
                         Ok(obj) => {
                             if let lopdf::Object::Dictionary(dict) = obj {
                                 let obj_type = if let Ok(t) = dict.get(b"Type") {
-                                    if let Some(name) = t.as_name().ok() {
+                                    if let Ok(name) = t.as_name() {
                                         String::from_utf8_lossy(name).to_string()
                                     } else {
                                         "No Type".to_string()

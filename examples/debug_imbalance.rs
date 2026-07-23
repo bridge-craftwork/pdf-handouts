@@ -12,8 +12,8 @@ fn count_graphics_state_imbalance(content: &[u8]) -> i32 {
     for i in 0..len {
         let c = bytes[i];
         if c == b'q' || c == b'Q' {
-            let prev_ok = i == 0 || !bytes[i-1].is_ascii_alphanumeric();
-            let next_ok = i + 1 >= len || !bytes[i+1].is_ascii_alphanumeric();
+            let prev_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            let next_ok = i + 1 >= len || !bytes[i + 1].is_ascii_alphanumeric();
             if prev_ok && next_ok {
                 if c == b'q' {
                     depth += 1;
@@ -27,17 +27,19 @@ fn count_graphics_state_imbalance(content: &[u8]) -> i32 {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args().nth(1).expect("Usage: debug_imbalance <pdf>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("Usage: debug_imbalance <pdf>");
     let mut doc = Document::load(Path::new(&path))?;
-    
+
     println!("Before decompress:");
     analyze(&doc);
-    
+
     doc.decompress();
-    
+
     println!("\nAfter decompress:");
     analyze(&doc);
-    
+
     Ok(())
 }
 
@@ -49,17 +51,29 @@ fn analyze(doc: &Document) {
             if let Ok(contents) = page_dict.get(b"Contents") {
                 let content_ids: Vec<_> = match contents {
                     Object::Reference(id) => vec![*id],
-                    Object::Array(arr) => arr.iter().filter_map(|o| {
-                        if let Object::Reference(id) = o { Some(*id) } else { None }
-                    }).collect(),
+                    Object::Array(arr) => arr
+                        .iter()
+                        .filter_map(|o| {
+                            if let Object::Reference(id) = o {
+                                Some(*id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                     _ => vec![],
                 };
-                
+
                 for content_id in content_ids {
                     if let Ok(Object::Stream(stream)) = doc.get_object(content_id) {
                         let imbalance = count_graphics_state_imbalance(&stream.content);
-                        println!("    Stream {:?}: {} bytes, imbalance: {}", content_id, stream.content.len(), imbalance);
-                        
+                        println!(
+                            "    Stream {:?}: {} bytes, imbalance: {}",
+                            content_id,
+                            stream.content.len(),
+                            imbalance
+                        );
+
                         // Show first 200 chars
                         let preview = String::from_utf8_lossy(&stream.content);
                         let preview: String = preview.chars().take(200).collect();

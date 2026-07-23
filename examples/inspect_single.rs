@@ -9,7 +9,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_path = Path::new("target/test_single_output.pdf");
     let mut doc = Document::load(output_path)?;
 
-    println!("PDF has {} objects, max_id: {}", doc.objects.len(), doc.max_id);
+    println!(
+        "PDF has {} objects, max_id: {}",
+        doc.objects.len(),
+        doc.max_id
+    );
 
     // Decompress for easier reading
     doc.decompress();

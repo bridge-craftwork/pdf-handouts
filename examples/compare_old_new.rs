@@ -5,7 +5,9 @@ use std::env;
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = env::args().nth(1).expect("Usage: compare_old_new <pdf_path>");
+    let path = env::args()
+        .nth(1)
+        .expect("Usage: compare_old_new <pdf_path>");
     println!("=== Inspecting: {} ===\n", path);
 
     let mut doc = Document::load(Path::new(&path))?;
@@ -39,7 +41,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         for (i, obj) in arr.iter().enumerate() {
                             if let Object::Reference(id) = obj {
                                 println!("\n--- Stream {} ({:?}) ---", i + 1, id);
-                                show_stream(&doc, *id, if i == 0 || i == arr.len() - 1 { 1000 } else { 200 })?;
+                                show_stream(
+                                    &doc,
+                                    *id,
+                                    if i == 0 || i == arr.len() - 1 {
+                                        1000
+                                    } else {
+                                        200
+                                    },
+                                )?;
                             }
                         }
                     }
@@ -59,7 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn show_stream(doc: &Document, id: lopdf::ObjectId, max_chars: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn show_stream(
+    doc: &Document,
+    id: lopdf::ObjectId,
+    max_chars: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(Object::Stream(stream)) = doc.get_object(id) {
         let content = String::from_utf8_lossy(&stream.content);
         let display = if content.len() > max_chars {

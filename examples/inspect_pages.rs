@@ -7,15 +7,15 @@ fn main() {
         eprintln!("Usage: inspect_pages <pdf_file>");
         return;
     }
-    
+
     let doc = Document::load(&args[1]).expect("Failed to load PDF");
     let pages = doc.get_pages();
-    
+
     println!("Total pages: {}", pages.len());
-    
+
     for (page_num, page_id) in pages {
         println!("\n=== Page {} (ID: {:?}) ===", page_num, page_id);
-        
+
         if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
             // Check Contents
             if let Ok(contents) = page_dict.get(b"Contents") {
@@ -38,7 +38,7 @@ fn main() {
                     _ => println!("Contents: {:?}", contents),
                 }
             }
-            
+
             // Check Resources
             if let Ok(resources) = page_dict.get(b"Resources") {
                 match resources {

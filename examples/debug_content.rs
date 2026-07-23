@@ -15,7 +15,7 @@ fn main() {
         footer_font: None,
         mask: MaskOptions::new(),
     };
-    
+
     // Simulate what should happen for each page
     for page in 1..=3 {
         println!("\n=== Simulating Page {} ===", page);

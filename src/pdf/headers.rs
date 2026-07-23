@@ -4,11 +4,11 @@
 //! without creating a separate watermark overlay file. This approach is simpler and more
 //! reliable than the overlay method.
 
-use std::path::Path;
-use lopdf::{Document, Object, ObjectId, Dictionary, Stream};
-use chrono::NaiveDate;
-use crate::error::Result;
 use crate::date::format_date;
+use crate::error::Result;
+use chrono::NaiveDate;
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
+use std::path::Path;
 
 /// Options for masking existing header/footer content
 #[derive(Debug, Clone, Default)]
@@ -48,7 +48,7 @@ impl MaskOptions {
     /// Get the effective header mask height for a given page
     pub fn effective_header_height(&self, is_first_page: bool) -> Option<f32> {
         // header_all takes precedence, then header (first page only)
-        self.header_all_height.or_else(|| {
+        self.header_all_height.or({
             if is_first_page {
                 self.header_height
             } else {
@@ -60,7 +60,7 @@ impl MaskOptions {
     /// Get the effective footer mask height for a given page
     pub fn effective_footer_height(&self, is_first_page: bool) -> Option<f32> {
         // footer_all takes precedence, then footer (first page only)
-        self.footer_all_height.or_else(|| {
+        self.footer_all_height.or({
             if is_first_page {
                 self.footer_height
             } else {
@@ -201,7 +201,8 @@ pub fn add_headers_footers(
     let font_id = embed_liberation_serif(&mut doc)?;
 
     // Collect page info first (to avoid borrow issues)
-    let pages: Vec<(usize, ObjectId)> = doc.get_pages()
+    let pages: Vec<(usize, ObjectId)> = doc
+        .get_pages()
         .iter()
         .enumerate()
         .map(|(i, (_num, id))| (i, *id))
@@ -257,7 +258,8 @@ fn use_helvetica_font(doc: &mut Document) -> Result<ObjectId> {
 /// on any system, regardless of whether the font is installed.
 fn embed_liberation_serif(doc: &mut Document) -> Result<ObjectId> {
     // Load the embedded font data
-    const LIBERATION_SERIF: &[u8] = include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
+    const LIBERATION_SERIF: &[u8] =
+        include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf");
 
     // Create font stream object (the actual TTF data)
     let mut font_stream_dict = Dictionary::new();
@@ -275,14 +277,20 @@ fn embed_liberation_serif(doc: &mut Document) -> Result<ObjectId> {
     let mut font_descriptor = Dictionary::new();
     font_descriptor.set("Type", Object::Name(b"FontDescriptor".to_vec()));
     font_descriptor.set("FontName", Object::Name(b"LiberationSerif".to_vec()));
-    font_descriptor.set("FontFamily", Object::String(b"Liberation Serif".to_vec(), lopdf::StringFormat::Literal));
+    font_descriptor.set(
+        "FontFamily",
+        Object::String(b"Liberation Serif".to_vec(), lopdf::StringFormat::Literal),
+    );
     font_descriptor.set("Flags", Object::Integer(34)); // Serif + Nonsymbolic
-    font_descriptor.set("FontBBox", Object::Array(vec![
-        Object::Integer(-543),
-        Object::Integer(-303),
-        Object::Integer(1300),
-        Object::Integer(981),
-    ]));
+    font_descriptor.set(
+        "FontBBox",
+        Object::Array(vec![
+            Object::Integer(-543),
+            Object::Integer(-303),
+            Object::Integer(1300),
+            Object::Integer(981),
+        ]),
+    );
     font_descriptor.set("ItalicAngle", Object::Integer(0));
     font_descriptor.set("Ascent", Object::Integer(891));
     font_descriptor.set("Descent", Object::Integer(-216));
@@ -575,7 +583,8 @@ fn generate_header_footer_content(
         content.push_str(&format!("{:.3} {:.3} {:.3} rg\n", r, g, b));
         // Draw rectangle: x y width height re (rectangle) f (fill)
         // Header is at top of page, so y = page_height - height
-        content.push_str(&format!("0 {} {} {} re f\n",
+        content.push_str(&format!(
+            "0 {} {} {} re f\n",
             page_height - height_pt,
             page_width,
             height_pt
@@ -589,10 +598,7 @@ fn generate_header_footer_content(
         // Set fill color
         content.push_str(&format!("{:.3} {:.3} {:.3} rg\n", r, g, b));
         // Draw rectangle at bottom of page (y = 0)
-        content.push_str(&format!("0 0 {} {} re f\n",
-            page_width,
-            height_pt
-        ));
+        content.push_str(&format!("0 0 {} {} re f\n", page_width, height_pt));
     }
 
     // Get effective font sizes from options (respects FontSpec if set)
@@ -603,7 +609,8 @@ fn generate_header_footer_content(
     if is_first_page {
         if let Some(ref title) = options.title {
             // Expand placeholders in title
-            let expanded_title = expand_placeholders(title, page_num, total_pages, options.date.as_ref());
+            let expanded_title =
+                expand_placeholders(title, page_num, total_pages, options.date.as_ref());
 
             // Position title 50pt from top of page (PDF coordinates: bottom-left origin)
             let title_y = page_height - 50.0;
@@ -646,14 +653,20 @@ fn generate_header_footer_content(
             // First line at top, subsequent lines below (Y decreases)
             let y = footer_top - (i as f32 * line_height);
             // Use font tag rendering for styled text
-            content.push_str(&generate_line_with_font_tags(line, 50.0, y, footer_font_size));
+            content.push_str(&generate_line_with_font_tags(
+                line,
+                50.0,
+                y,
+                footer_font_size,
+            ));
         }
     }
 
     // Footer center
     if let Some(ref center_text) = options.footer_center {
         // Expand placeholders first, then parse lines
-        let expanded = expand_placeholders(center_text, page_num, total_pages, options.date.as_ref());
+        let expanded =
+            expand_placeholders(center_text, page_num, total_pages, options.date.as_ref());
         let lines = parse_multiline_text(&expanded);
         let num_lines = lines.len();
         let footer_top = 30.0 + ((num_lines - 1) as f32 * line_height);
@@ -670,7 +683,8 @@ fn generate_header_footer_content(
     // Footer right - now uses placeholder-based content like other footers
     if let Some(ref right_text) = options.footer_right {
         // Expand placeholders first, then parse lines
-        let expanded = expand_placeholders(right_text, page_num, total_pages, options.date.as_ref());
+        let expanded =
+            expand_placeholders(right_text, page_num, total_pages, options.date.as_ref());
         let lines = parse_multiline_text(&expanded);
         let num_lines = lines.len();
         let footer_top = 30.0 + ((num_lines.saturating_sub(1)) as f32 * line_height);
@@ -679,7 +693,7 @@ fn generate_header_footer_content(
             // Use width calculation that excludes font tags
             let text_width = estimate_text_width_with_tags(line, footer_font_size);
             let x = page_width - 50.0 - text_width; // Right-aligned with margin
-            // Use font tag rendering for styled text
+                                                    // Use font tag rendering for styled text
             content.push_str(&generate_line_with_font_tags(line, x, y, footer_font_size));
         }
     }
@@ -693,7 +707,12 @@ fn generate_header_footer_content(
 /// - `[page]` - current page number
 /// - `[pages]` - total page count
 /// - `[date]` - formatted date (if provided)
-fn expand_placeholders(text: &str, page_num: usize, total_pages: usize, date: Option<&NaiveDate>) -> String {
+fn expand_placeholders(
+    text: &str,
+    page_num: usize,
+    total_pages: usize,
+    date: Option<&NaiveDate>,
+) -> String {
     let mut result = text.to_string();
 
     // Replace page placeholders (case-insensitive)
@@ -726,7 +745,7 @@ fn expand_placeholders(text: &str, page_num: usize, total_pages: usize, date: Op
 /// - `bold italic 16pt Times_New_Roman #333333` (all components)
 ///
 /// All components are optional. Underscores in family names are converted to spaces.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FontSpec {
     /// Font weight (normal or bold)
     pub bold: bool,
@@ -738,18 +757,6 @@ pub struct FontSpec {
     pub family: Option<String>,
     /// Text color as RGB tuple (0.0-1.0 for each component)
     pub color: Option<(f32, f32, f32)>,
-}
-
-impl Default for FontSpec {
-    fn default() -> Self {
-        Self {
-            bold: false,
-            italic: false,
-            size: None,
-            family: None,
-            color: None,
-        }
-    }
 }
 
 impl FontSpec {
@@ -916,12 +923,7 @@ fn parse_font_style(tag_content: &str) -> FontStyle {
 }
 
 /// Generate PDF content for a single line with font tag support
-fn generate_line_with_font_tags(
-    line: &str,
-    x: f32,
-    y: f32,
-    font_size: f32,
-) -> String {
+fn generate_line_with_font_tags(line: &str, x: f32, y: f32, font_size: f32) -> String {
     let segments = parse_font_tags(line);
     let mut content = String::new();
     let mut current_x = x;
@@ -971,7 +973,8 @@ fn generate_line_with_font_tags(
 /// Estimate text width excluding font tags
 fn estimate_text_width_with_tags(text: &str, font_size: f32) -> f32 {
     let segments = parse_font_tags(text);
-    segments.iter()
+    segments
+        .iter()
         .map(|s| estimate_text_width(&s.text, font_size))
         .sum()
 }
@@ -1013,11 +1016,7 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
 /// The Form XObject has its own coordinate system defined by BBox.
 /// Since we wrap the original page content in q/Q before invoking this XObject,
 /// it renders in standard page coordinates (identity CTM).
-fn create_form_xobject(
-    doc: &mut Document,
-    content: String,
-    font_id: ObjectId,
-) -> Result<ObjectId> {
+fn create_form_xobject(doc: &mut Document, content: String, font_id: ObjectId) -> Result<ObjectId> {
     // Create Resources dictionary for the Form XObject
     let mut resources = Dictionary::new();
     let mut fonts = Dictionary::new();
@@ -1031,22 +1030,28 @@ fn create_form_xobject(
     xobject_dict.set("FormType", Object::Integer(1));
 
     // BBox defines the Form's coordinate system - use standard Letter size
-    xobject_dict.set("BBox", Object::Array(vec![
-        Object::Integer(0),
-        Object::Integer(0),
-        Object::Integer(612),
-        Object::Integer(792),
-    ]));
+    xobject_dict.set(
+        "BBox",
+        Object::Array(vec![
+            Object::Integer(0),
+            Object::Integer(0),
+            Object::Integer(612),
+            Object::Integer(792),
+        ]),
+    );
 
     // Identity matrix - our XObject uses standard page coordinates
-    xobject_dict.set("Matrix", Object::Array(vec![
-        Object::Integer(1),
-        Object::Integer(0),
-        Object::Integer(0),
-        Object::Integer(1),
-        Object::Integer(0),
-        Object::Integer(0),
-    ]));
+    xobject_dict.set(
+        "Matrix",
+        Object::Array(vec![
+            Object::Integer(1),
+            Object::Integer(0),
+            Object::Integer(0),
+            Object::Integer(1),
+            Object::Integer(0),
+            Object::Integer(0),
+        ]),
+    );
 
     xobject_dict.set("Resources", Object::Dictionary(resources));
 
@@ -1079,8 +1084,8 @@ fn count_graphics_state_imbalance(content: &[u8]) -> i32 {
         // Check for 'q' or 'Q'
         if c == b'q' || c == b'Q' {
             // Check it's not part of a larger token (like /Fq or BQ)
-            let prev_ok = i == 0 || !bytes[i-1].is_ascii_alphanumeric();
-            let next_ok = i + 1 >= len || !bytes[i+1].is_ascii_alphanumeric();
+            let prev_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            let next_ok = i + 1 >= len || !bytes[i + 1].is_ascii_alphanumeric();
 
             if prev_ok && next_ok {
                 if c == b'q' {
@@ -1118,9 +1123,16 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
             if let Ok(contents) = page_dict.get(b"Contents") {
                 let content_ids: Vec<ObjectId> = match contents {
                     Object::Reference(id) => vec![*id],
-                    Object::Array(arr) => arr.iter().filter_map(|o| {
-                        if let Object::Reference(id) = o { Some(*id) } else { None }
-                    }).collect(),
+                    Object::Array(arr) => arr
+                        .iter()
+                        .filter_map(|o| {
+                            if let Object::Reference(id) = o {
+                                Some(*id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                     _ => vec![],
                 };
 
@@ -1140,10 +1152,7 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
     };
 
     // Create stream for "q\n" (save graphics state)
-    let q_stream_id = doc.add_object(Stream::new(
-        Dictionary::new(),
-        b"q\n".to_vec(),
-    ));
+    let q_stream_id = doc.add_object(Stream::new(Dictionary::new(), b"q\n".to_vec()));
 
     // Build the closing stream:
     // - First, close any unclosed graphics states from original content
@@ -1163,10 +1172,7 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
     // Draw our XObject in clean coordinate space
     qx_content.push_str("q 1 0 0 1 0 0 cm /HeaderFooter Do Q\n");
 
-    let qx_stream_id = doc.add_object(Stream::new(
-        Dictionary::new(),
-        qx_content.into_bytes(),
-    ));
+    let qx_stream_id = doc.add_object(Stream::new(Dictionary::new(), qx_content.into_bytes()));
 
     // Get the page and modify its Contents
     let page_obj = doc.get_object_mut(page_id)?;
@@ -1206,7 +1212,11 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
 }
 
 /// Add XObject reference to page's Resources dictionary
-fn add_xobject_to_page_resources(doc: &mut Document, page_id: ObjectId, xobject_id: ObjectId) -> Result<()> {
+fn add_xobject_to_page_resources(
+    doc: &mut Document,
+    page_id: ObjectId,
+    xobject_id: ObjectId,
+) -> Result<()> {
     // First, get the resources dictionary and XObject subdictionary
     // We need to dereference both if they are references
     let (resources_dict, xobjects_dict) = {
@@ -1228,12 +1238,8 @@ fn add_xobject_to_page_resources(doc: &mut Document, page_id: ObjectId, xobject_
                 }
             } else {
                 // No Resources on page - check parent for inherited Resources
-                if let Ok(parent) = page_dict.get(b"Parent") {
-                    if let Object::Reference(parent_id) = parent {
-                        get_inherited_resources(doc, *parent_id)
-                    } else {
-                        Dictionary::new()
-                    }
+                if let Ok(Object::Reference(parent_id)) = page_dict.get(b"Parent") {
+                    get_inherited_resources(doc, *parent_id)
                 } else {
                     Dictionary::new()
                 }
@@ -1300,10 +1306,8 @@ fn get_inherited_resources(doc: &Document, parent_id: ObjectId) -> Dictionary {
         }
 
         // Not found here, check grandparent
-        if let Ok(grandparent) = parent_dict.get(b"Parent") {
-            if let Object::Reference(grandparent_id) = grandparent {
-                return get_inherited_resources(doc, *grandparent_id);
-            }
+        if let Ok(Object::Reference(grandparent_id)) = parent_dict.get(b"Parent") {
+            return get_inherited_resources(doc, *grandparent_id);
         }
     }
 

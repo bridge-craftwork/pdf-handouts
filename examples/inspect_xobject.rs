@@ -7,41 +7,44 @@ fn main() {
         eprintln!("Usage: inspect_xobject <pdf_file>");
         return;
     }
-    
+
     let doc = Document::load(&args[1]).expect("Failed to load PDF");
     let pages = doc.get_pages();
-    
+
     for (page_num, page_id) in pages {
         println!("\n=== Page {} ===", page_num);
-        
+
         if let Ok(Object::Dictionary(page_dict)) = doc.get_object(page_id) {
             if let Ok(resources) = page_dict.get(b"Resources") {
                 let res_dict = match resources {
                     Object::Reference(id) => {
                         if let Ok(Object::Dictionary(d)) = doc.get_object(*id) {
                             d.clone()
-                        } else { continue; }
+                        } else {
+                            continue;
+                        }
                     }
                     Object::Dictionary(d) => d.clone(),
                     _ => continue,
                 };
-                
+
                 if let Ok(Object::Dictionary(xobjects)) = res_dict.get(b"XObject") {
-                    if let Ok(hf) = xobjects.get(b"HeaderFooter") {
-                        if let Object::Reference(hf_id) = hf {
-                            println!("HeaderFooter XObject ID: {:?}", hf_id);
-                            if let Ok(Object::Stream(stream)) = doc.get_object(*hf_id) {
-                                let content = String::from_utf8_lossy(&stream.content);
-                                // Show relevant footer content
-                                if content.contains("Page") {
-                                    for line in content.lines() {
-                                        if line.contains("Page") || line.contains("Tj") {
-                                            println!("  {}", line.trim());
-                                        }
+                    if let Ok(Object::Reference(hf_id)) = xobjects.get(b"HeaderFooter") {
+                        println!("HeaderFooter XObject ID: {:?}", hf_id);
+                        if let Ok(Object::Stream(stream)) = doc.get_object(*hf_id) {
+                            let content = String::from_utf8_lossy(&stream.content);
+                            // Show relevant footer content
+                            if content.contains("Page") {
+                                for line in content.lines() {
+                                    if line.contains("Page") || line.contains("Tj") {
+                                        println!("  {}", line.trim());
                                     }
-                                } else {
-                                    println!("  Content preview: {}...", &content.chars().take(200).collect::<String>());
                                 }
+                            } else {
+                                println!(
+                                    "  Content preview: {}...",
+                                    &content.chars().take(200).collect::<String>()
+                                );
                             }
                         }
                     }

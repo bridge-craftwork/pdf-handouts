@@ -1,7 +1,7 @@
 //! Test adding headers/footers to the already-merged PDF
 
-use pdf_handouts::pdf::{add_headers_footers, HeaderFooterOptions, MaskOptions};
 use chrono::NaiveDate;
+use pdf_handouts::pdf::{add_headers_footers, HeaderFooterOptions, MaskOptions};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
