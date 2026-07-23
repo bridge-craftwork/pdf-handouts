@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build complete ID map first
     let mut id_map: HashMap<ObjectId, ObjectId> = HashMap::new();
-    for (old_id, _) in watermark_doc.objects.iter() {
+    for old_id in watermark_doc.objects.keys() {
         let new_id = (old_id.0 + id_offset, old_id.1);
         id_map.insert(*old_id, new_id);
     }

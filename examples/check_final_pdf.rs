@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             println!(
                                 "  Last stream: NO HeaderFooter (first 100 chars: {})",
-                                &content_str.chars().take(100).collect::<String>()
+                                content_str.chars().take(100).collect::<String>()
                             );
                         }
                     }
