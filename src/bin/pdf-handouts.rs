@@ -8,25 +8,94 @@
 // kept out of the PR that introduced CI.
 #![allow(clippy::too_many_arguments)]
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use glob::glob;
 use std::path::PathBuf;
 use std::process;
 
 use pdf_handouts::date::{parse_date_expression, resolve_date};
 use pdf_handouts::pdf::{
-    add_headers_footers, merge_pdfs, FontSpec, HeaderFooterOptions, MaskOptions, MergeOptions,
+    add_headers_footers_reporting, detect_input_kind, merge_pdfs, FitAction, FitMode, FontSpec,
+    HeaderFooterOptions, InputKind, MaskOptions, MergeOptions, PageFit, SUPPORTED_INPUT_FORMATS,
 };
+
+/// How source content should be adjusted to clear the header and footer.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum FitArg {
+    /// Shift content down when that is enough, scale it down when it is not
+    Auto,
+    /// Only shift content; never resize it
+    Shift,
+    /// Leave source content exactly as it is
+    Off,
+}
+
+impl From<FitArg> for FitMode {
+    fn from(arg: FitArg) -> Self {
+        match arg {
+            FitArg::Auto => FitMode::Auto,
+            FitArg::Shift => FitMode::ShiftOnly,
+            FitArg::Off => FitMode::Off,
+        }
+    }
+}
+
+/// Print a one-line summary of any pages whose content had to be adjusted.
+fn report_fits(report: &[PageFit]) {
+    let mut shifted = Vec::new();
+    let mut scaled = Vec::new();
+
+    for fit in report {
+        match fit.action {
+            FitAction::Shifted(dy) => shifted.push(format!("{} ({:.0}pt)", fit.page, dy.abs())),
+            FitAction::Scaled(s) => scaled.push(format!("{} ({:.0}%)", fit.page, s * 100.0)),
+            FitAction::Unchanged => {}
+        }
+    }
+
+    if !shifted.is_empty() {
+        eprintln!(
+            "  Moved content clear of the title/footer on page(s): {}",
+            shifted.join(", ")
+        );
+    }
+    if !scaled.is_empty() {
+        eprintln!("  Scaled content to fit on page(s): {}", scaled.join(", "));
+    }
+}
 
 /// PDF Handouts - Merge PDFs and add headers/footers
 #[derive(Parser)]
 #[command(name = "pdf-handouts")]
 #[command(author, version, about, long_about = None)]
 #[command(after_help = "COMMANDS:
-    build     Merge PDFs and add headers/footers in one step
+    build     Merge inputs and add headers/footers in one step
     headers   Add headers/footers to an existing PDF
-    merge     Merge multiple PDFs (no headers/footers)
+    merge     Merge multiple inputs (no headers/footers)
     info      Show PDF information (page count, metadata)
+
+INPUT FORMATS:
+    PDF, plus PNG, JPEG, GIF and WebP images. Images become one US Letter
+    page each: scaled to fit and centered, on a landscape page when the
+    image is wider than it is tall. Margins leave room for headers/footers.
+    Any other file type is an error, never silently skipped.
+
+LANDSCAPE PAGES:
+    A landscape page keeps its landscape shape, so it reads correctly on
+    screen. Its title and footer are drawn turned a quarter turn along the
+    short edges, so that when the printer rotates the page onto portrait
+    paper they land at the top and bottom of the sheet like every other page.
+
+CONTENT FITTING (--fit):
+    Source pages know nothing about the title and footer, so their content
+    can collide with them. By default the content is measured and moved out
+    of the way: shifted if that is enough, scaled down about the page centre
+    if it is not.
+      auto    shift when possible, scale when necessary [default]
+      shift   only ever move content; never resize it
+      off     leave source content exactly as it is
+    Fitting is skipped on any page using --mask-*, since moving the content
+    under a mask would defeat the mask.
 
 OPTIONS (for build and headers commands):
     -o, --output <FILE>          Output PDF file path (required)
@@ -43,6 +112,7 @@ OPTIONS (for build and headers commands):
     --mask-header-all <INCHES>   Mask header on all pages
     --mask-footer-all <INCHES>   Mask footer on all pages
     --mask-color <COLOR>         Mask color [default: #ffffff]
+    --fit <MODE>                 auto | shift | off [default: auto]
     --open                       Open output file after creation
 
 PLACEHOLDERS (use in footer text):
@@ -81,9 +151,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Merge multiple PDF files into one
+    /// Merge multiple PDF and/or image files into one PDF
     Merge {
-        /// Input PDF files (in order). Supports glob patterns like "*.pdf"
+        /// Input PDF/image files (in order). Supports glob patterns like "*.pdf"
         #[arg(required = true)]
         inputs: Vec<String>,
 
@@ -98,7 +168,7 @@ enum Commands {
 
     /// Add headers and footers to a PDF
     Headers {
-        /// Input PDF file
+        /// Input PDF or image file
         input: PathBuf,
 
         /// Output PDF file path
@@ -159,14 +229,18 @@ enum Commands {
         #[arg(long, value_name = "COLOR", default_value = "#ffffff")]
         mask_color: String,
 
+        /// How to keep source content clear of the title and footer
+        #[arg(long, value_name = "MODE", value_enum, default_value_t = FitArg::Auto)]
+        fit: FitArg,
+
         /// Open the output file after creation
         #[arg(long)]
         open: bool,
     },
 
-    /// Merge PDFs and add headers/footers in one step
+    /// Merge PDFs/images and add headers/footers in one step
     Build {
-        /// Input PDF files (in order). Supports glob patterns like "*.pdf"
+        /// Input PDF/image files (in order). Supports glob patterns like "*.pdf"
         #[arg(required = true)]
         inputs: Vec<String>,
 
@@ -227,6 +301,10 @@ enum Commands {
         /// Mask color (default: white). Format: "#rrggbb" or "#rgb"
         #[arg(long, value_name = "COLOR", default_value = "#ffffff")]
         mask_color: String,
+
+        /// How to keep source content clear of the title and footer
+        #[arg(long, value_name = "MODE", value_enum, default_value_t = FitArg::Auto)]
+        fit: FitArg,
 
         /// Open the output file after creation
         #[arg(long)]
@@ -265,6 +343,7 @@ fn main() {
             mask_header_all,
             mask_footer_all,
             mask_color,
+            fit,
             open,
         } => cmd_headers(
             input,
@@ -282,6 +361,7 @@ fn main() {
             mask_header_all,
             mask_footer_all,
             mask_color,
+            fit,
             open,
         ),
         Commands::Build {
@@ -300,6 +380,7 @@ fn main() {
             mask_header_all,
             mask_footer_all,
             mask_color,
+            fit,
             open,
         } => cmd_build(
             inputs,
@@ -317,6 +398,7 @@ fn main() {
             mask_header_all,
             mask_footer_all,
             mask_color,
+            fit,
             open,
         ),
         Commands::Info { input } => cmd_info(input),
@@ -360,6 +442,65 @@ fn expand_globs(patterns: Vec<String>) -> Result<Vec<PathBuf>, Box<dyn std::erro
     Ok(paths)
 }
 
+/// Check that every input exists and is a format we can merge.
+///
+/// Reports *all* offending files rather than stopping at the first, so a folder
+/// with several unusable inputs takes one run to diagnose. Returns the number of
+/// image inputs that will be converted to PDF pages.
+fn validate_inputs(inputs: &[PathBuf]) -> Result<usize, Box<dyn std::error::Error>> {
+    let mut missing: Vec<&PathBuf> = Vec::new();
+    let mut unsupported: Vec<&PathBuf> = Vec::new();
+    let mut image_count = 0;
+
+    for path in inputs {
+        if !path.exists() {
+            missing.push(path);
+            continue;
+        }
+        match detect_input_kind(path) {
+            Ok(InputKind::Pdf) => {}
+            Ok(InputKind::Image(_)) => image_count += 1,
+            Err(_) => unsupported.push(path),
+        }
+    }
+
+    if !missing.is_empty() {
+        let list = missing
+            .iter()
+            .map(|p| format!("\n  {}", p.display()))
+            .collect::<String>();
+        return Err(format!("Input file not found:{}", list).into());
+    }
+
+    if !unsupported.is_empty() {
+        let list = unsupported
+            .iter()
+            .map(|p| format!("\n  {}", p.display()))
+            .collect::<String>();
+        return Err(format!(
+            "Unsupported input file(s):{}\n\nSupported formats: {}",
+            list, SUPPORTED_INPUT_FORMATS
+        )
+        .into());
+    }
+
+    Ok(image_count)
+}
+
+/// Describe an input set for progress output, e.g. "5 files (2 images)"
+fn describe_inputs(total: usize, image_count: usize) -> String {
+    let files = if total == 1 { "file" } else { "files" };
+    if image_count > 0 {
+        let images = if image_count == 1 { "image" } else { "images" };
+        format!(
+            "{} {} ({} {} to convert)",
+            total, files, image_count, images
+        )
+    } else {
+        format!("{} PDF {}", total, files)
+    }
+}
+
 /// Open a file with the system default application
 fn open_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
@@ -388,14 +529,10 @@ fn cmd_merge(
     // Expand glob patterns
     let inputs = expand_globs(inputs)?;
 
-    // Validate inputs exist
-    for path in &inputs {
-        if !path.exists() {
-            return Err(format!("Input file not found: {}", path.display()).into());
-        }
-    }
+    // Validate inputs exist and are a format we can merge
+    let image_count = validate_inputs(&inputs)?;
 
-    eprintln!("Merging {} PDF files...", inputs.len());
+    eprintln!("Merging {}...", describe_inputs(inputs.len(), image_count));
 
     let options = MergeOptions {
         input_paths: inputs,
@@ -452,6 +589,7 @@ fn cmd_headers(
     mask_header_all: Option<f32>,
     mask_footer_all: Option<f32>,
     mask_color: String,
+    fit: FitArg,
     open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !input.exists() {
@@ -495,10 +633,12 @@ fn cmd_headers(
         header_font: header_spec,
         footer_font: footer_spec,
         mask,
+        fit: fit.into(),
     };
 
     eprintln!("Adding headers/footers...");
-    add_headers_footers(&input, &output, &options)?;
+    let report = add_headers_footers_reporting(&input, &output, &options)?;
+    report_fits(&report);
 
     eprintln!("Output: {}", output.display());
 
@@ -526,23 +666,23 @@ fn cmd_build(
     mask_header_all: Option<f32>,
     mask_footer_all: Option<f32>,
     mask_color: String,
+    fit: FitArg,
     open: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Expand glob patterns
     let inputs = expand_globs(inputs)?;
 
-    // Validate inputs exist
-    for path in &inputs {
-        if !path.exists() {
-            return Err(format!("Input file not found: {}", path.display()).into());
-        }
-    }
+    // Validate inputs exist and are a format we can merge
+    let image_count = validate_inputs(&inputs)?;
 
     // Create temporary file for merged PDF
     let temp_dir = std::env::temp_dir();
     let temp_merged = temp_dir.join("pdf-handouts-merged-temp.pdf");
 
-    eprintln!("Step 1: Merging {} PDF files...", inputs.len());
+    eprintln!(
+        "Step 1: Merging {}...",
+        describe_inputs(inputs.len(), image_count)
+    );
 
     let merge_options = MergeOptions {
         input_paths: inputs,
@@ -588,10 +728,12 @@ fn cmd_build(
         header_font: header_spec,
         footer_font: footer_spec,
         mask,
+        fit: fit.into(),
     };
 
     eprintln!("Step 2: Adding headers/footers...");
-    add_headers_footers(&temp_merged, &output, &options)?;
+    let report = add_headers_footers_reporting(&temp_merged, &output, &options)?;
+    report_fits(&report);
 
     // Clean up temp file
     let _ = std::fs::remove_file(&temp_merged);

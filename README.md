@@ -24,18 +24,89 @@ pdf-handouts build \
   --date today
 ```
 
+## Input formats
+
+Inputs may be PDFs or raster images — **PNG, JPEG, GIF, WebP**. Images are
+converted to PDF as they are read, so a folder of handouts can freely mix
+screenshots with generated PDFs:
+
+```bash
+pdf-handouts build "1. Ladder.pdf" "2. Screenshot.png" "3. Notes.pdf" -o handout.pdf
+```
+
+Each image becomes one US Letter page: scaled to fit and centered, on a
+landscape page when the image is wider than it is tall. A 1in margin is left on
+the two edges that carry the title and footer and 0.5in on the other two — which
+on a landscape page means the deeper margin is on the left and right, since
+that is where its header and footer go (see [Landscape pages](#landscape-pages)).
+
+The file's type is determined by its contents, not its extension, so a
+misnamed file still works. **An input that is neither a PDF nor a supported
+image is an error** — it is never silently dropped from the output:
+
+```
+Error: Unsupported input file(s):
+  5. Notes.txt
+
+Supported formats: PDF, PNG, JPEG, GIF, WebP
+```
+
+## Page layout
+
+### Landscape pages
+
+A landscape page — a wide screenshot, say — keeps its landscape shape, so it
+still reads correctly on screen and on a projector with no manual rotation.
+
+Its title and footer, though, are drawn turned a quarter turn along the page's
+**short edges**. When a printer rotates the landscape page to fit portrait
+paper, they land at the top and bottom of the sheet, in line with every other
+page in the stack. That keeps a stapled handout consistent: the reader turns
+the sheet to look at the picture, but the page furniture is always where they
+expect it.
+
+### Content fitting
+
+Source documents know nothing about the title and footer bands, so their
+content can collide with them — most visibly, a title printed over the
+document's own heading. By default pdf-handouts measures where each page's ink
+actually falls and moves it clear:
+
+| Situation | What happens |
+|-----------|--------------|
+| Content already clears the bands | Left untouched |
+| Content merely sits too high or low | **Shifted**; nothing is resized |
+| Content too tall to shift | **Scaled** down about the page centre, then centred in the space |
+
+Each page is adjusted on its own, so a page that needs nothing keeps its full
+size. The tool reports what it did:
+
+```
+Step 2: Adding headers/footers...
+  Moved content clear of the title/footer on page(s): 1 (25pt)
+```
+
+Control it with `--fit`:
+
+- `auto` — shift when possible, scale when necessary (default)
+- `shift` — only ever move content, never resize it
+- `off` — leave source content exactly as it is
+
+Fitting is skipped on any page using `--mask-*`. A mask is a promise to cover a
+specific region of the source, and moving the content underneath would break it.
+
 ## Commands
 
 ### `build` - Merge and add headers/footers
 
-The most common workflow: merge multiple PDFs and add headers/footers in one step.
+The most common workflow: merge multiple PDFs and/or images and add headers/footers in one step.
 
 ```bash
 pdf-handouts build [OPTIONS] --output <OUTPUT> <INPUTS>...
 ```
 
 **Arguments:**
-- `<INPUTS>...` - Input PDF files in order
+- `<INPUTS>...` - Input PDF/image files in order
 
 **Options:**
 - `-o, --output <OUTPUT>` - Output PDF file path (required)
@@ -47,6 +118,7 @@ pdf-handouts build [OPTIONS] --output <OUTPUT> <INPUTS>...
 - `--font <SPEC>` - Font specification for both header and footer
 - `--header-font <SPEC>` - Font specification for header only
 - `--footer-font <SPEC>` - Font specification for footer only
+- `--fit <MODE>` - How to keep source content clear of the title/footer: `auto` (default), `shift`, `off`
 
 **Example:**
 ```bash
@@ -62,9 +134,9 @@ pdf-handouts build \
   --header-font "24pt #222222"
 ```
 
-### `merge` - Merge PDFs only
+### `merge` - Merge only
 
-Merge multiple PDFs into one without adding headers/footers.
+Merge multiple PDFs and/or images into one PDF without adding headers/footers.
 
 ```bash
 pdf-handouts merge [OPTIONS] --output <OUTPUT> <INPUTS>...
@@ -72,7 +144,7 @@ pdf-handouts merge [OPTIONS] --output <OUTPUT> <INPUTS>...
 
 **Example:**
 ```bash
-pdf-handouts merge file1.pdf file2.pdf file3.pdf -o merged.pdf
+pdf-handouts merge file1.pdf screenshot.png file3.pdf -o merged.pdf
 ```
 
 ### `headers` - Add headers/footers to existing PDF

@@ -1,6 +1,6 @@
 [package]
 name = "pdf-handouts"
-version = "0.3.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Rick Wilson"]
 description = "Cross-platform PDF manipulation tool for merging PDFs and adding headers/footers"

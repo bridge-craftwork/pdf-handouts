@@ -1,4 +1,4 @@
-use pdf_handouts::pdf::{HeaderFooterOptions, MaskOptions};
+use pdf_handouts::pdf::{FitMode, HeaderFooterOptions, MaskOptions};
 
 fn main() {
     let options = HeaderFooterOptions {
@@ -14,6 +14,7 @@ fn main() {
         header_font: None,
         footer_font: None,
         mask: MaskOptions::new(),
+        fit: FitMode::Auto,
     };
 
     // Simulate what should happen for each page
