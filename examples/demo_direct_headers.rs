@@ -2,7 +2,8 @@
 
 use chrono::NaiveDate;
 use pdf_handouts::pdf::{
-    add_headers_footers, merge_pdfs, FontSpec, HeaderFooterOptions, MaskOptions, MergeOptions,
+    add_headers_footers, merge_pdfs, FitMode, FontSpec, HeaderFooterOptions, MaskOptions,
+    MergeOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -82,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Use FontSpec to set footer color to a slightly lighter gray
         footer_font: Some(FontSpec::parse("14pt #555555")),
         mask: MaskOptions::new(),
+        fit: FitMode::Auto,
     };
 
     add_headers_footers(merged_path, final_output_path, &header_footer_options)?;

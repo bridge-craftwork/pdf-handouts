@@ -1,6 +1,7 @@
 //! PDF merging functionality using lopdf
 
 use crate::error::{Error, Result};
+use crate::pdf::image::load_input_document;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,13 +9,22 @@ use std::path::PathBuf;
 /// Options for merging PDFs
 #[derive(Debug, Clone)]
 pub struct MergeOptions {
-    /// Input PDF file paths in the order they should be merged
+    /// Input file paths in the order they should be merged.
+    ///
+    /// Each entry may be a PDF or a raster image (PNG, JPEG, GIF, WebP);
+    /// images are converted to a single PDF page as they are loaded.
     pub input_paths: Vec<PathBuf>,
     /// Output PDF file path
     pub output_path: PathBuf,
 }
 
-/// Merge multiple PDF files into a single PDF
+/// Merge multiple input files into a single PDF
+///
+/// Inputs may be PDFs or raster images (PNG, JPEG, GIF, WebP). Images are
+/// converted to a single US Letter page each — see
+/// [`crate::pdf::image::image_to_pdf_bytes`] for the layout rules. An input
+/// that is neither produces [`Error::UnsupportedInput`] rather than being
+/// skipped.
 ///
 /// Based on the lopdf merge example:
 /// https://github.com/J-F-Liu/lopdf/blob/main/examples/merge.rs
@@ -47,10 +57,10 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
         }
     }
 
-    // Load all documents
+    // Load all documents, converting image inputs to single-page PDFs
     let mut documents: Vec<Document> = Vec::new();
     for path in &options.input_paths {
-        let doc = Document::load(path)?;
+        let doc = load_input_document(path)?;
 
         // Validate document has pages
         if doc.get_pages().is_empty() {

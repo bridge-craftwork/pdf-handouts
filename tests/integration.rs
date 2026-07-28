@@ -2,8 +2,9 @@
 
 use chrono::NaiveDate;
 use pdf_handouts::pdf::{
-    count_pages, create_watermark_pdf, merge_pdfs, overlay_watermark, MergeOptions,
-    WatermarkOptions,
+    add_headers_footers, add_headers_footers_reporting, count_pages, create_watermark_pdf,
+    detect_input_kind, image_to_pdf, merge_pdfs, overlay_watermark, HeaderFooterOptions,
+    ImageFormat, InputKind, MergeOptions, WatermarkOptions,
 };
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -310,5 +311,297 @@ fn test_full_workflow_merge_watermark_overlay() {
     println!(
         "✓ Final output: {} pages with headers/footers",
         final_page_count
+    );
+}
+
+/// Test helper to get the path to an image fixture
+fn image_fixture_path(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests");
+    path.push("fixtures");
+    path.push("images");
+    path.push(name);
+    path
+}
+
+#[test]
+fn test_detect_input_kind_by_content() {
+    assert_eq!(
+        detect_input_kind(&image_fixture_path("landscape.png")).expect("png should be detected"),
+        InputKind::Image(ImageFormat::Png)
+    );
+    assert_eq!(
+        detect_input_kind(&image_fixture_path("photo.jpg")).expect("jpeg should be detected"),
+        InputKind::Image(ImageFormat::Jpeg)
+    );
+
+    let pdf = fixture_path("1. NT Ladder - Google Docs.pdf");
+    if pdf.exists() {
+        assert_eq!(
+            detect_input_kind(&pdf).expect("pdf should be detected"),
+            InputKind::Pdf
+        );
+    }
+}
+
+#[test]
+fn test_unsupported_input_is_an_error_not_a_skip() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output_path = temp_dir.path().join("output.pdf");
+    let text_file = image_fixture_path("notes.txt");
+
+    // A plain text file mixed in with real inputs must fail the whole merge
+    // rather than being quietly dropped from the output.
+    let options = MergeOptions {
+        input_paths: vec![image_fixture_path("landscape.png"), text_file.clone()],
+        output_path: output_path.clone(),
+    };
+
+    let result = merge_pdfs(&options);
+    assert!(result.is_err(), "Unsupported input should fail the merge");
+
+    let message = result.expect_err("checked above").to_string();
+    assert!(
+        message.contains("Unsupported") && message.contains("notes.txt"),
+        "Error should name the offending file: {}",
+        message
+    );
+    assert!(
+        !output_path.exists(),
+        "No output should be written when an input is unusable"
+    );
+}
+
+#[test]
+fn test_image_to_pdf_page_orientation() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // A wider-than-tall image gets a landscape page; a taller image stays portrait.
+    for (fixture, expect_landscape) in [("landscape.png", true), ("portrait.png", false)] {
+        let output = temp_dir.path().join(format!("{}.pdf", fixture));
+        image_to_pdf(&image_fixture_path(fixture), &output).expect("image conversion failed");
+
+        assert_eq!(
+            count_pages(&output).expect("converted image should have a page"),
+            1,
+            "{} should convert to exactly one page",
+            fixture
+        );
+
+        let doc = lopdf::Document::load(&output).expect("converted PDF should load");
+        let (_, page_id) = doc
+            .get_pages()
+            .into_iter()
+            .next()
+            .expect("converted PDF should have a page");
+        let media_box = doc
+            .get_dictionary(page_id)
+            .and_then(|dict| dict.get(b"MediaBox"))
+            .and_then(|obj| obj.as_array())
+            .expect("page should have a MediaBox")
+            .iter()
+            .map(|obj| obj.as_float().unwrap_or(0.0))
+            .collect::<Vec<f32>>();
+
+        let width = media_box[2] - media_box[0];
+        let height = media_box[3] - media_box[1];
+
+        if expect_landscape {
+            assert!(
+                width > height,
+                "{} should produce a landscape page, got {}x{}",
+                fixture,
+                width,
+                height
+            );
+        } else {
+            assert!(
+                height > width,
+                "{} should produce a portrait page, got {}x{}",
+                fixture,
+                width,
+                height
+            );
+        }
+
+        // Either way the page is US Letter, so headers/footers stay aligned.
+        let (long_edge, short_edge) = if width > height {
+            (width, height)
+        } else {
+            (height, width)
+        };
+        assert!(
+            (long_edge - 792.0).abs() < 0.5 && (short_edge - 612.0).abs() < 0.5,
+            "{} should produce a US Letter page, got {}x{}",
+            fixture,
+            width,
+            height
+        );
+    }
+}
+
+#[test]
+fn test_merge_mixes_pdfs_and_images() {
+    let pdf = fixture_path("1. NT Ladder - Google Docs.pdf");
+    if !pdf.exists() {
+        eprintln!("Skipping mixed merge test: PDF fixture not found");
+        return;
+    }
+    let pdf_pages = count_pages(&pdf).expect("Failed to count pages in fixture");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output_path = temp_dir.path().join("mixed.pdf");
+
+    // One PDF plus three images, each contributing a single page.
+    let options = MergeOptions {
+        input_paths: vec![
+            pdf,
+            image_fixture_path("landscape.png"),
+            image_fixture_path("portrait.png"),
+            image_fixture_path("photo.jpg"),
+        ],
+        output_path: output_path.clone(),
+    };
+
+    merge_pdfs(&options).expect("Failed to merge mixed PDF and image inputs");
+
+    let merged_pages = count_pages(&output_path).expect("Failed to count merged pages");
+    assert_eq!(
+        merged_pages,
+        pdf_pages + 3,
+        "Each image should contribute exactly one page"
+    );
+}
+
+/// Read a page's MediaBox width and height from a produced PDF.
+fn page_size(path: &PathBuf, index: usize) -> (f32, f32) {
+    let doc = lopdf::Document::load(path).expect("output PDF should load");
+    let pages = doc.get_pages();
+    let page_id = *pages
+        .values()
+        .nth(index)
+        .unwrap_or_else(|| panic!("PDF should have a page {}", index + 1));
+    let media = pdf_handouts::pdf::fit::page_media_box(&doc, page_id);
+    (media.width(), media.height())
+}
+
+#[test]
+fn test_landscape_image_keeps_a_landscape_page() {
+    // The page itself must stay landscape so it still reads correctly on
+    // screen; only the header/footer text is turned onto the short edges.
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output = temp_dir.path().join("landscape.pdf");
+
+    let options = HeaderFooterOptions {
+        title: Some("A Title".to_string()),
+        footer_right: Some("Page [page] of [pages]".to_string()),
+        ..Default::default()
+    };
+
+    add_headers_footers(&image_fixture_path("landscape.png"), &output, &options)
+        .expect("headers should be added to a landscape image page");
+
+    let (w, h) = page_size(&output, 0);
+    assert!(
+        w > h,
+        "landscape image should stay on a landscape page: {}x{}",
+        w,
+        h
+    );
+}
+
+#[test]
+fn test_content_is_shifted_clear_of_the_title() {
+    // A source page whose content runs right up to the top would otherwise have
+    // the title printed over it.
+    let source = fixture_path("1. NT Ladder - Google Docs.pdf");
+    if !source.exists() {
+        eprintln!("Skipping fit test: PDF fixture not found");
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output = temp_dir.path().join("fitted.pdf");
+
+    let options = HeaderFooterOptions {
+        title: Some("A Title That Needs Room".to_string()),
+        footer_left: Some("Org|[date]".to_string()),
+        footer_right: Some("Page [page] of [pages]|".to_string()),
+        ..Default::default()
+    };
+
+    let report =
+        add_headers_footers_reporting(&source, &output, &options).expect("headers should be added");
+
+    assert!(!report.is_empty(), "report should cover every page");
+    assert!(
+        report
+            .iter()
+            .any(|f| !matches!(f.action, pdf_handouts::pdf::FitAction::Unchanged)),
+        "a full page under a title should have been adjusted: {:?}",
+        report
+    );
+}
+
+#[test]
+fn test_fit_off_leaves_content_untouched() {
+    let source = fixture_path("1. NT Ladder - Google Docs.pdf");
+    if !source.exists() {
+        eprintln!("Skipping fit-off test: PDF fixture not found");
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output = temp_dir.path().join("unfitted.pdf");
+
+    let options = HeaderFooterOptions {
+        title: Some("A Title That Needs Room".to_string()),
+        fit: pdf_handouts::pdf::FitMode::Off,
+        ..Default::default()
+    };
+
+    let report =
+        add_headers_footers_reporting(&source, &output, &options).expect("headers should be added");
+
+    assert!(
+        report
+            .iter()
+            .all(|f| matches!(f.action, pdf_handouts::pdf::FitAction::Unchanged)),
+        "fit=off must not move anything: {:?}",
+        report
+    );
+}
+
+#[test]
+fn test_masking_disables_fitting() {
+    // A mask is a promise to cover a specific region of the source; moving the
+    // content underneath it would break that promise.
+    let source = fixture_path("1. NT Ladder - Google Docs.pdf");
+    if !source.exists() {
+        eprintln!("Skipping mask test: PDF fixture not found");
+        return;
+    }
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let output = temp_dir.path().join("masked.pdf");
+
+    let options = HeaderFooterOptions {
+        title: Some("A Title That Needs Room".to_string()),
+        mask: pdf_handouts::pdf::MaskOptions {
+            header_all_height: Some(0.5),
+            ..pdf_handouts::pdf::MaskOptions::new()
+        },
+        ..Default::default()
+    };
+
+    let report =
+        add_headers_footers_reporting(&source, &output, &options).expect("headers should be added");
+
+    assert!(
+        report
+            .iter()
+            .all(|f| matches!(f.action, pdf_handouts::pdf::FitAction::Unchanged)),
+        "a mask must suppress content fitting: {:?}",
+        report
     );
 }

@@ -37,6 +37,19 @@ pub enum Error {
     #[error("PDF has no pages: {}", .0.display())]
     EmptyPdf(PathBuf),
 
+    /// Input file is neither a PDF nor a supported image
+    #[error("Unsupported input file: {} (supported formats: {})", .0.display(), crate::pdf::SUPPORTED_INPUT_FORMATS)]
+    UnsupportedInput(PathBuf),
+
+    /// Image file could not be decoded
+    #[error("Failed to decode {format} image: {}", .path.display())]
+    ImageDecode {
+        /// Path to the image that failed to decode
+        path: PathBuf,
+        /// Detected image format name (e.g. "PNG")
+        format: String,
+    },
+
     /// Font error
     #[error("Font error: {0}")]
     Font(String),

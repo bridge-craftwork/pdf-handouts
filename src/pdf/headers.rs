@@ -6,9 +6,27 @@
 
 use crate::date::format_date;
 use crate::error::Result;
+use crate::pdf::bounds::content_bounds;
+use crate::pdf::fit::{fit_content, page_media_box, Fit, FitAction, FitMode, Matrix, PageFrame};
 use chrono::NaiveDate;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use std::path::Path;
+
+/// Distance from the top of the layout frame to the title's baseline, in points.
+const TITLE_BASELINE_FROM_TOP: f32 = 50.0;
+/// Distance from the bottom of the layout frame to the lowest footer baseline.
+const FOOTER_BASELINE_FROM_BOTTOM: f32 = 30.0;
+/// Left and right margin for header and footer text, in points.
+const SIDE_MARGIN: f32 = 50.0;
+/// Footer line spacing as a multiple of the footer font size.
+const FOOTER_LINE_SPACING: f32 = 1.2;
+/// Glyph rise above the baseline, as a fraction of font size.
+///
+/// Used to work out how much vertical room the header and footer text needs so
+/// source content can be moved clear of it.
+const GLYPH_ASCENT_RATIO: f32 = 0.75;
+/// Glyph drop below the baseline, as a fraction of font size.
+const GLYPH_DESCENT_RATIO: f32 = 0.25;
 
 /// Options for masking existing header/footer content
 #[derive(Debug, Clone, Default)]
@@ -97,6 +115,8 @@ pub struct HeaderFooterOptions {
     pub footer_font: Option<FontSpec>,
     /// Masking options for covering existing header/footer content
     pub mask: MaskOptions,
+    /// How to adjust source content that collides with the header/footer bands
+    pub fit: FitMode,
 }
 
 impl Default for HeaderFooterOptions {
@@ -114,6 +134,7 @@ impl Default for HeaderFooterOptions {
             header_font: None,
             footer_font: None,
             mask: MaskOptions::new(),
+            fit: FitMode::Auto,
         }
     }
 }
@@ -189,8 +210,31 @@ pub fn add_headers_footers(
     output_path: &Path,
     options: &HeaderFooterOptions,
 ) -> Result<()> {
-    // Load the PDF
-    let mut doc = Document::load(input_path)?;
+    add_headers_footers_reporting(input_path, output_path, options).map(|_| ())
+}
+
+/// What happened to one page while headers and footers were added.
+#[derive(Debug, Clone, Copy)]
+pub struct PageFit {
+    /// 1-based page number
+    pub page: usize,
+    /// Whether the page was laid out rotated (a landscape page)
+    pub rotated: bool,
+    /// The adjustment applied to the source content
+    pub action: FitAction,
+}
+
+/// Add headers and footers, reporting how each page's content was adjusted.
+///
+/// Identical to [`add_headers_footers`], but returns a per-page record of what
+/// the content fitting did so a caller can surface it to the user.
+pub fn add_headers_footers_reporting(
+    input_path: &Path,
+    output_path: &Path,
+    options: &HeaderFooterOptions,
+) -> Result<Vec<PageFit>> {
+    // Load the input (a PDF, or an image converted to a single-page PDF)
+    let mut doc = crate::pdf::image::load_input_document(input_path)?;
 
     // Decompress for easier content stream parsing
     doc.decompress();
@@ -208,15 +252,34 @@ pub fn add_headers_footers(
         .map(|(i, (_num, id))| (i, *id))
         .collect();
 
+    let mut report = Vec::with_capacity(pages.len());
+
     // For each page, wrap content in q/Q and add XObject overlay
     for (i, page_id) in pages.iter() {
         let page_number = i + 1;
+        let is_first_page = page_number == 1;
+
+        // Headers and footers are laid out in an upright frame, which for a
+        // landscape page is the page turned a quarter turn (see PageFrame).
+        let media_box = page_media_box(&doc, *page_id);
+        let frame = PageFrame::new(media_box.width(), media_box.height());
+
+        // Work out how much of the frame the header and footer will occupy,
+        // then move or shrink the source content out of those bands.
+        let fit = compute_page_fit(&doc, *page_id, &frame, is_first_page, options);
+        report.push(PageFit {
+            page: page_number,
+            rotated: frame.rotated,
+            action: fit.map_or(FitAction::Unchanged, |f| f.action),
+        });
 
         // Generate the content stream for this page's headers/footers
         let content = generate_header_footer_content(
             page_number,
             page_count,
-            page_number == 1, // is_first_page
+            is_first_page,
+            frame.frame_width(),
+            frame.frame_height(),
             options,
         );
 
@@ -226,17 +289,95 @@ pub fn add_headers_footers(
         // Add the Form XObject to the page's Resources
         add_xobject_to_page_resources(&mut doc, *page_id, xobject_id)?;
 
-        // Wrap original content in q/Q and append XObject invocation
-        // This is the key: the Q resets the graphics state (including CTM),
-        // then we draw our XObject in clean page coordinates
-        wrap_content_and_append_xobject(&mut doc, *page_id)?;
+        // Wrap original content in q/Q and append XObject invocation.
+        // The Q resets the graphics state (including CTM), so the overlay is
+        // drawn in clean page coordinates — rotated into place for a landscape
+        // page. Any fit transform goes inside the wrapper, so it applies to the
+        // source content only.
+        wrap_content_and_append_xobject(
+            &mut doc,
+            *page_id,
+            fit.map(|f| f.transform),
+            frame.frame_to_page(),
+        )?;
     }
 
     // Save the modified PDF
     doc.compress();
     doc.save(output_path)?;
 
-    Ok(())
+    Ok(report)
+}
+
+/// Vertical breathing room left between source content and the header/footer.
+const FIT_GAP: f32 = 6.0;
+
+/// Decide how a page's content must move or shrink to clear the bands.
+///
+/// Returns `None` when nothing needs to change, when the page's ink cannot be
+/// measured, or when a mask is active — a mask is a promise to cover a specific
+/// region of the source, and moving the content underneath would break it.
+fn compute_page_fit(
+    doc: &Document,
+    page_id: ObjectId,
+    frame: &PageFrame,
+    is_first_page: bool,
+    options: &HeaderFooterOptions,
+) -> Option<Fit> {
+    if options.fit == FitMode::Off {
+        return None;
+    }
+    if options
+        .mask
+        .effective_header_height(is_first_page)
+        .is_some()
+        || options
+            .mask
+            .effective_footer_height(is_first_page)
+            .is_some()
+    {
+        return None;
+    }
+
+    let frame_height = frame.frame_height();
+
+    // Top of the safe area: just under the title, on the page that has one.
+    let safe_high = if is_first_page && options.title.is_some() {
+        let header_size = options.effective_header_font_size();
+        frame_height - TITLE_BASELINE_FROM_TOP - GLYPH_DESCENT_RATIO * header_size - FIT_GAP
+    } else {
+        frame_height
+    };
+
+    // Bottom of the safe area: just above the tallest footer column.
+    let footer_lines = footer_line_count(options);
+    let safe_low = if footer_lines > 0 {
+        let footer_size = options.effective_footer_font_size();
+        let line_height = footer_size * FOOTER_LINE_SPACING;
+        FOOTER_BASELINE_FROM_BOTTOM
+            + (footer_lines - 1) as f32 * line_height
+            + GLYPH_ASCENT_RATIO * footer_size
+            + FIT_GAP
+    } else {
+        0.0
+    };
+
+    let content = content_bounds(doc, page_id)?;
+    fit_content(frame, content, safe_low, safe_high, options.fit)
+}
+
+/// The greatest number of lines any footer column will occupy.
+fn footer_line_count(options: &HeaderFooterOptions) -> usize {
+    [
+        options.footer_left.as_ref(),
+        options.footer_center.as_ref(),
+        options.footer_right.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|text| parse_multiline_text(text).len())
+    .max()
+    .unwrap_or(0)
 }
 
 /// Use Helvetica (standard PDF font - simpler than embedding)
@@ -563,13 +704,11 @@ fn generate_header_footer_content(
     page_num: usize,
     total_pages: usize,
     is_first_page: bool,
+    page_width: f32,
+    page_height: f32,
     options: &HeaderFooterOptions,
 ) -> String {
     let mut content = String::new();
-
-    // Page dimensions (US Letter: 612pt × 792pt)
-    let page_width = 612.0;
-    let page_height = 792.0;
 
     // Points per inch for converting mask heights
     const POINTS_PER_INCH: f32 = 72.0;
@@ -613,7 +752,7 @@ fn generate_header_footer_content(
                 expand_placeholders(title, page_num, total_pages, options.date.as_ref());
 
             // Position title 50pt from top of page (PDF coordinates: bottom-left origin)
-            let title_y = page_height - 50.0;
+            let title_y = page_height - TITLE_BASELINE_FROM_TOP;
             let title_width = estimate_text_width(&expanded_title, header_font_size);
             let title_x = (page_width - title_width) / 2.0; // Center
 
@@ -639,7 +778,7 @@ fn generate_header_footer_content(
     // Add footers
     // We position footer lines starting from the bottom of the page, with the
     // first line at the top of the footer area and subsequent lines below it.
-    let line_height = footer_font_size * 1.2;
+    let line_height = footer_font_size * FOOTER_LINE_SPACING;
 
     // Footer left
     if let Some(ref left_text) = options.footer_left {
@@ -648,14 +787,14 @@ fn generate_header_footer_content(
         let lines = parse_multiline_text(&expanded);
         let num_lines = lines.len();
         // Calculate top of footer area: start high enough to fit all lines above the margin
-        let footer_top = 30.0 + ((num_lines - 1) as f32 * line_height);
+        let footer_top = FOOTER_BASELINE_FROM_BOTTOM + ((num_lines - 1) as f32 * line_height);
         for (i, line) in lines.iter().enumerate() {
             // First line at top, subsequent lines below (Y decreases)
             let y = footer_top - (i as f32 * line_height);
             // Use font tag rendering for styled text
             content.push_str(&generate_line_with_font_tags(
                 line,
-                50.0,
+                SIDE_MARGIN,
                 y,
                 footer_font_size,
             ));
@@ -669,7 +808,7 @@ fn generate_header_footer_content(
             expand_placeholders(center_text, page_num, total_pages, options.date.as_ref());
         let lines = parse_multiline_text(&expanded);
         let num_lines = lines.len();
-        let footer_top = 30.0 + ((num_lines - 1) as f32 * line_height);
+        let footer_top = FOOTER_BASELINE_FROM_BOTTOM + ((num_lines - 1) as f32 * line_height);
         for (i, line) in lines.iter().enumerate() {
             let y = footer_top - (i as f32 * line_height);
             // Use width calculation that excludes font tags
@@ -687,13 +826,14 @@ fn generate_header_footer_content(
             expand_placeholders(right_text, page_num, total_pages, options.date.as_ref());
         let lines = parse_multiline_text(&expanded);
         let num_lines = lines.len();
-        let footer_top = 30.0 + ((num_lines.saturating_sub(1)) as f32 * line_height);
+        let footer_top =
+            FOOTER_BASELINE_FROM_BOTTOM + ((num_lines.saturating_sub(1)) as f32 * line_height);
         for (i, line) in lines.iter().enumerate() {
             let y = footer_top - (i as f32 * line_height);
             // Use width calculation that excludes font tags
             let text_width = estimate_text_width_with_tags(line, footer_font_size);
-            let x = page_width - 50.0 - text_width; // Right-aligned with margin
-                                                    // Use font tag rendering for styled text
+            let x = page_width - SIDE_MARGIN - text_width; // Right-aligned with margin
+                                                           // Use font tag rendering for styled text
             content.push_str(&generate_line_with_font_tags(line, x, y, footer_font_size));
         }
     }
@@ -1115,7 +1255,12 @@ fn count_graphics_state_imbalance(content: &[u8]) -> i32 {
 /// Stream 3: Q Q Q... (enough to balance)
 ///           q 1 0 0 1 0 0 cm /HeaderFooter Do Q
 /// ```
-fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Result<()> {
+fn wrap_content_and_append_xobject(
+    doc: &mut Document,
+    page_id: ObjectId,
+    fit_transform: Option<Matrix>,
+    overlay_transform: Matrix,
+) -> Result<()> {
     // First, read existing content to count q/Q imbalance
     let imbalance = {
         let page_obj = doc.get_object(page_id)?;
@@ -1151,8 +1296,16 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
         }
     };
 
-    // Create stream for "q\n" (save graphics state)
-    let q_stream_id = doc.add_object(Stream::new(Dictionary::new(), b"q\n".to_vec()));
+    // Create the opening stream: save the graphics state, then apply the fit
+    // transform (if any) so it affects the source content and nothing else.
+    let mut q_content = String::from("q\n");
+    if let Some(m) = fit_transform {
+        q_content.push_str(&format!(
+            "{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm\n",
+            m[0], m[1], m[2], m[3], m[4], m[5]
+        ));
+    }
+    let q_stream_id = doc.add_object(Stream::new(Dictionary::new(), q_content.into_bytes()));
 
     // Build the closing stream:
     // - First, close any unclosed graphics states from original content
@@ -1169,8 +1322,18 @@ fn wrap_content_and_append_xobject(doc: &mut Document, page_id: ObjectId) -> Res
     // Close our initial q
     qx_content.push_str(" Q\n");
 
-    // Draw our XObject in clean coordinate space
-    qx_content.push_str("q 1 0 0 1 0 0 cm /HeaderFooter Do Q\n");
+    // Draw our XObject in clean coordinate space. On a landscape page the
+    // overlay transform is a quarter turn, which puts the title and footer
+    // along the short edges instead of the long ones.
+    qx_content.push_str(&format!(
+        "q {:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm /HeaderFooter Do Q\n",
+        overlay_transform[0],
+        overlay_transform[1],
+        overlay_transform[2],
+        overlay_transform[3],
+        overlay_transform[4],
+        overlay_transform[5]
+    ));
 
     let qx_stream_id = doc.add_object(Stream::new(Dictionary::new(), qx_content.into_bytes()));
 
