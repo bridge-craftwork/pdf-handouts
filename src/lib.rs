@@ -25,6 +25,7 @@
 //! merge_pdfs(&options).expect("Failed to merge PDFs");
 //! ```
 
+pub mod build;
 pub mod date;
 pub mod error;
 pub mod layout;

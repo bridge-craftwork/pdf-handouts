@@ -13,7 +13,7 @@
 
 use crate::error::{Error, Result};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// US Letter width in points (8.5in x 72).
 const LETTER_SHORT_EDGE: f32 = 612.0;
@@ -121,6 +121,16 @@ pub fn detect_input_kind(path: &Path) -> Result<InputKind> {
     sniff(&header[..filled]).ok_or_else(|| Error::UnsupportedInput(path.to_path_buf()))
 }
 
+/// Determine whether in-memory data is a PDF or a supported image.
+///
+/// The byte-oriented counterpart to [`detect_input_kind`], for callers that
+/// already hold the file contents — a browser drop target, say. `name` is used
+/// only to identify the input in error messages.
+pub fn detect_input_kind_from_bytes(name: &str, data: &[u8]) -> Result<InputKind> {
+    let header = &data[..data.len().min(12)];
+    sniff(header).ok_or_else(|| Error::UnsupportedInput(PathBuf::from(name)))
+}
+
 /// Render a raster image into a single-page PDF and return the PDF bytes.
 ///
 /// The page is US Letter, rotated to landscape when the image is wider than it
@@ -128,30 +138,37 @@ pub fn detect_input_kind(path: &Path) -> Result<InputKind> {
 /// sides, 1in top and bottom to leave room for headers and footers),
 /// preserving its aspect ratio, and centred on the page.
 pub fn image_to_pdf_bytes(path: &Path) -> Result<Vec<u8>> {
+    let data = std::fs::read(path)?;
+    image_to_pdf_bytes_from_data(&path.display().to_string(), &data)
+}
+
+/// Render raster image data into a single-page PDF and return the PDF bytes.
+///
+/// The byte-oriented counterpart to [`image_to_pdf_bytes`]; see it for the page
+/// layout rules. `name` is used only to identify the input in error messages.
+pub fn image_to_pdf_bytes_from_data(name: &str, data: &[u8]) -> Result<Vec<u8>> {
     use krilla::image::Image;
     use krilla::{Document, PageSettings};
     use tiny_skia_path::{Size, Transform};
 
-    let format = match detect_input_kind(path)? {
+    let format = match detect_input_kind_from_bytes(name, data)? {
         InputKind::Image(format) => format,
         InputKind::Pdf => {
             return Err(Error::General(format!(
                 "{} is already a PDF; no image conversion needed",
-                path.display()
+                name
             )))
         }
     };
 
-    let data = std::fs::read(path)?;
-
     let image = match format {
-        ImageFormat::Png => Image::from_png(&data),
-        ImageFormat::Jpeg => Image::from_jpeg(&data),
-        ImageFormat::Gif => Image::from_gif(&data),
-        ImageFormat::WebP => Image::from_webp(&data),
+        ImageFormat::Png => Image::from_png(data),
+        ImageFormat::Jpeg => Image::from_jpeg(data),
+        ImageFormat::Gif => Image::from_gif(data),
+        ImageFormat::WebP => Image::from_webp(data),
     }
     .ok_or_else(|| Error::ImageDecode {
-        path: path.to_path_buf(),
+        path: PathBuf::from(name),
         format: format.name().to_string(),
     })?;
 
@@ -190,7 +207,7 @@ pub fn image_to_pdf_bytes(path: &Path) -> Result<Vec<u8>> {
 
     let drawn_size =
         Size::from_wh(drawn_width, drawn_height).ok_or_else(|| Error::ImageDecode {
-            path: path.to_path_buf(),
+            path: PathBuf::from(name),
             format: format.name().to_string(),
         })?;
 
@@ -232,6 +249,20 @@ pub fn load_input_document(path: &Path) -> Result<lopdf::Document> {
         InputKind::Pdf => Ok(lopdf::Document::load(path)?),
         InputKind::Image(_) => {
             let pdf = image_to_pdf_bytes(path)?;
+            Ok(lopdf::Document::load_mem(&pdf)?)
+        }
+    }
+}
+
+/// Load in-memory data as an lopdf `Document`, converting images to PDF first.
+///
+/// The byte-oriented counterpart to [`load_input_document`]. `name` is used
+/// only to identify the input in error messages.
+pub fn load_input_document_from_bytes(name: &str, data: &[u8]) -> Result<lopdf::Document> {
+    match detect_input_kind_from_bytes(name, data)? {
+        InputKind::Pdf => Ok(lopdf::Document::load_mem(data)?),
+        InputKind::Image(_) => {
+            let pdf = image_to_pdf_bytes_from_data(name, data)?;
             Ok(lopdf::Document::load_mem(&pdf)?)
         }
     }

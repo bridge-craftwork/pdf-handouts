@@ -2,6 +2,19 @@
 
 A cross-platform command-line tool for merging PDFs and adding custom headers and footers.
 
+## Use it in your browser
+
+<https://bridge-craftwork.github.io/pdf-handouts/>
+
+Drop your PDFs and screenshots on the page, fill in the title and footers, and
+download the finished handout. It is the same Rust code compiled to
+WebAssembly, so it produces the same output as the command line — page content
+is byte-for-byte identical.
+
+**Nothing is uploaded.** The whole pipeline runs inside the browser tab, which
+matters if your handouts carry student names or anything else you would rather
+not put on someone else's server.
+
 ## Installation
 
 ```bash
@@ -305,6 +318,26 @@ pdf-handouts build \
 ## Library Usage
 
 This tool is also available as a Rust library. See [LIBRARY.md](LIBRARY.md) for API documentation.
+
+Every entry point comes in two forms: a path-based one that reads and writes
+files, and a byte-oriented one that does not touch the filesystem at all
+(`merge_documents`, `add_headers_footers_bytes`, `build_handout`). The second
+set is what the WebAssembly build uses.
+
+## Building the web version
+
+```bash
+cd wasm
+wasm-pack build --release --target web --out-dir ../web/pkg --no-typescript
+cd ../web && python3 -m http.server 8000
+```
+
+Then open <http://localhost:8000>. The page must be served over http — browsers
+will not load a WebAssembly module from a `file://` URL.
+
+The `wasm` feature turns off the CLI-only dependencies and switches lopdf to a
+`getrandom` backend that works on `wasm32-unknown-unknown`. Pushing to `main`
+rebuilds and redeploys the site automatically.
 
 ## License
 
