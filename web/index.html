@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Handouts — merge PDFs and images into a printable handout</title>
+<meta name="description" content="Merge PDFs and screenshots into one printable handout with titles, footers and page numbers. Runs entirely in your browser — files are never uploaded.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
+</head>
+<body>
+
+<header class="masthead">
+  <h1>PDF Handouts</h1>
+  <p class="tagline">
+    Merge PDFs and screenshots into one printable handout, with a title,
+    footers and page numbers.
+  </p>
+  <p class="privacy" role="note">
+    <strong>Your files never leave this page.</strong> Everything runs inside
+    your browser — nothing is uploaded to a server.
+  </p>
+</header>
+
+<main>
+  <!-- Step 1: files -->
+  <section class="panel" aria-labelledby="files-heading">
+    <h2 id="files-heading"><span class="step">1</span> Choose your files</h2>
+
+    <div id="dropzone" class="dropzone" tabindex="0" role="button"
+         aria-describedby="dropzone-hint">
+      <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+              fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p class="drop-title">Drop files here</p>
+      <p id="dropzone-hint" class="drop-hint">
+        or click to browse — PDF, PNG, JPEG, GIF, WebP
+      </p>
+      <input type="file" id="file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,application/pdf,image/*" hidden>
+    </div>
+
+    <div id="file-list-wrap" class="file-list-wrap" hidden>
+      <div class="list-header">
+        <h3>Pages, in order</h3>
+        <button type="button" id="sort-by-name" class="link-button">Sort by name</button>
+      </div>
+      <p class="list-hint">Drag to reorder.</p>
+      <ul id="file-list" class="file-list"></ul>
+    </div>
+  </section>
+
+  <!-- Step 2: options -->
+  <section class="panel" aria-labelledby="options-heading">
+    <h2 id="options-heading"><span class="step">2</span> Set the page furniture</h2>
+
+    <div class="field">
+      <label for="title">Title</label>
+      <input type="text" id="title" placeholder="Slam Bidding — Afternoon Class">
+      <p class="help">Centred at the top of the first page.</p>
+    </div>
+
+    <div class="field">
+      <label for="date">Date</label>
+      <input type="text" id="date" placeholder="today">
+      <p class="help">
+        <code>today</code>, <code>2026-07-28</code>, <code>Tuesday</code> or
+        <code>Tuesday+1</code>. Fills the <code>[date]</code> placeholder.
+      </p>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="footer-left">Footer left</label>
+        <input type="text" id="footer-left" placeholder="Your Organization|[date]">
+      </div>
+      <div class="field">
+        <label for="footer-center">Footer centre</label>
+        <input type="text" id="footer-center" placeholder="Presented by:|Your Name">
+      </div>
+      <div class="field">
+        <label for="footer-right">Footer right</label>
+        <input type="text" id="footer-right" value="Page [page] of [pages]">
+      </div>
+    </div>
+
+    <p class="help placeholders">
+      Use <code>|</code> for a line break, and the placeholders
+      <code>[page]</code>, <code>[pages]</code>, <code>[date]</code>.
+      Wrap text in <code>[font italic]…[/font]</code> or
+      <code>[font bold]…[/font]</code> for inline styling.
+    </p>
+
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="field-row">
+        <div class="field">
+          <label for="header-font">Title font</label>
+          <input type="text" id="header-font" value="24pt">
+          <p class="help">e.g. <code>24pt bold #1a4d8f</code></p>
+        </div>
+        <div class="field">
+          <label for="footer-font">Footer font</label>
+          <input type="text" id="footer-font" value="14pt #555555">
+        </div>
+        <div class="field">
+          <label for="fit">Content fitting</label>
+          <select id="fit">
+            <option value="auto" selected>Auto — shift, then scale</option>
+            <option value="shift">Shift only — never resize</option>
+            <option value="off">Off — leave content alone</option>
+          </select>
+          <p class="help">Keeps source pages clear of the title and footer.</p>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- Step 3: build -->
+  <section class="panel" aria-labelledby="build-heading">
+    <h2 id="build-heading"><span class="step">3</span> Build it</h2>
+
+    <div class="build-row">
+      <button type="button" id="build" class="primary" disabled>
+        Build handout
+      </button>
+      <span id="status" class="status" role="status" aria-live="polite">
+        Loading…
+      </span>
+    </div>
+
+    <div id="result" class="result" hidden>
+      <a id="download" class="download" download="handout.pdf">
+        Download handout.pdf
+      </a>
+      <p id="result-summary" class="result-summary"></p>
+      <ul id="notes" class="notes"></ul>
+    </div>
+
+    <div id="error" class="error" role="alert" hidden></div>
+  </section>
+</main>
+
+<footer class="colophon">
+  <p>
+    Built with
+    <a href="https://github.com/bridge-craftwork/pdf-handouts">pdf-handouts</a>,
+    compiled to WebAssembly. The same tool is available as a command-line
+    program.
+  </p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 //! PDF merging functionality using lopdf
 
 use crate::error::{Error, Result};
-use crate::pdf::image::load_input_document;
+use crate::pdf::image::{load_input_document, load_input_document_from_bytes};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -70,6 +70,54 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
         documents.push(doc);
     }
 
+    let mut merged = combine_documents(documents)?;
+    merged.save(&options.output_path)?;
+
+    Ok(())
+}
+
+/// An input file held in memory, paired with a name for error messages.
+#[derive(Debug, Clone)]
+pub struct NamedInput {
+    /// Display name, used only to identify the input in errors
+    pub name: String,
+    /// File contents — a PDF or a supported image
+    pub data: Vec<u8>,
+}
+
+/// Merge in-memory inputs into a single PDF and return its bytes.
+///
+/// The byte-oriented counterpart to [`merge_pdfs`], with the same rules: inputs
+/// may be PDFs or raster images, and anything else is an error rather than
+/// being skipped. Nothing touches the filesystem, so this is what the
+/// WebAssembly build uses.
+pub fn merge_documents(inputs: &[NamedInput]) -> Result<Vec<u8>> {
+    if inputs.is_empty() {
+        return Err(Error::General("No input files provided".to_string()));
+    }
+
+    let mut documents: Vec<Document> = Vec::new();
+    for input in inputs {
+        let doc = load_input_document_from_bytes(&input.name, &input.data)?;
+
+        if doc.get_pages().is_empty() {
+            return Err(Error::EmptyPdf(PathBuf::from(&input.name)));
+        }
+
+        documents.push(doc);
+    }
+
+    let mut merged = combine_documents(documents)?;
+    let mut buffer = Vec::new();
+    merged.save_to(&mut buffer)?;
+
+    Ok(buffer)
+}
+
+/// Splice loaded documents into one, concatenating their pages in order.
+///
+/// Shared by the path-based and in-memory merge entry points.
+fn combine_documents(documents: Vec<Document>) -> Result<Document> {
     // Define a starting max_id for merged document
     let mut max_id = 1;
     let mut page_ids: Vec<(u32, u16)> = Vec::new();
@@ -146,11 +194,10 @@ pub fn merge_pdfs(options: &MergeOptions) -> Result<()> {
         }
     }
 
-    // Compress and save
+    // Compress and hand back the assembled document
     merged_doc.compress();
-    merged_doc.save(&options.output_path)?;
 
-    Ok(())
+    Ok(merged_doc)
 }
 
 /// Overlay a watermark PDF onto a source PDF

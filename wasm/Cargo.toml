@@ -1,0 +1,30 @@
+[package]
+name = "pdf-handouts-wasm"
+version = "1.0.0"
+edition = "2021"
+authors = ["Rick Wilson"]
+description = "WebAssembly bindings for pdf-handouts, used by the browser build"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The library itself, without the CLI-only dependencies. `wasm` turns on
+# lopdf's getrandom backend for wasm32 targets.
+pdf-handouts = { path = "..", default-features = false, features = ["wasm"] }
+
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Turns Rust panics into readable console messages instead of "unreachable".
+console_error_panic_hook = "0.1"
+
+# The whole payload ships over the wire, so favour size over speed. PDF
+# assembly is not compute-bound; a handout builds in well under a second.
+# Cargo profiles have to live at the workspace root, so the Rust-level settings
+# are there; this controls the wasm-opt pass wasm-pack runs afterwards.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]

@@ -234,8 +234,36 @@ pub fn add_headers_footers_reporting(
     options: &HeaderFooterOptions,
 ) -> Result<Vec<PageFit>> {
     // Load the input (a PDF, or an image converted to a single-page PDF)
-    let mut doc = crate::pdf::image::load_input_document(input_path)?;
+    let doc = crate::pdf::image::load_input_document(input_path)?;
+    let (pdf, report) = stamp_document(doc, options)?;
+    std::fs::write(output_path, pdf)?;
+    Ok(report)
+}
 
+/// Add headers and footers to in-memory PDF or image data.
+///
+/// The byte-oriented counterpart to [`add_headers_footers_reporting`], for
+/// callers that hold the file contents rather than a path. Returns the finished
+/// PDF alongside the per-page fit report. Nothing touches the filesystem, so
+/// this is what the WebAssembly build uses. `name` identifies the input in
+/// error messages.
+pub fn add_headers_footers_bytes(
+    name: &str,
+    data: &[u8],
+    options: &HeaderFooterOptions,
+) -> Result<(Vec<u8>, Vec<PageFit>)> {
+    let doc = crate::pdf::image::load_input_document_from_bytes(name, data)?;
+    stamp_document(doc, options)
+}
+
+/// Stamp headers and footers onto a loaded document, returning the PDF bytes.
+///
+/// Shared by the path-based and in-memory entry points so both take exactly the
+/// same layout, rotation and content-fitting decisions.
+fn stamp_document(
+    mut doc: Document,
+    options: &HeaderFooterOptions,
+) -> Result<(Vec<u8>, Vec<PageFit>)> {
     // Decompress for easier content stream parsing
     doc.decompress();
 
@@ -302,11 +330,12 @@ pub fn add_headers_footers_reporting(
         )?;
     }
 
-    // Save the modified PDF
+    // Serialise the modified PDF
     doc.compress();
-    doc.save(output_path)?;
+    let mut buffer = Vec::new();
+    doc.save_to(&mut buffer)?;
 
-    Ok(report)
+    Ok((buffer, report))
 }
 
 /// Vertical breathing room left between source content and the header/footer.
