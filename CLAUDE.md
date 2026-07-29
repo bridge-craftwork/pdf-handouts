@@ -46,6 +46,25 @@ All located at `/Users/rick/Development/GitHub/`:
 | [pbn-to-pdf](../pbn-to-pdf) | PDF generation | sibling |
 | [printpdf-fork](../printpdf-fork) | PDF library fork | upstream dependency |
 
+### Before running cargo in a sibling repo
+
+**Read that repo's own `CLAUDE.md` first, and check for a `dev-build.sh`.** Most
+of the bridge repos have one, and in those, bare `cargo build`/`test`/`clippy`
+does the wrong thing: they carry gitignored `[patch]` overrides in
+`.cargo/config.toml` pointing sibling crates at local checkouts, so cargo either
+silently rewrites `Cargo.lock` with local paths that must never be committed, or
+silently ignores the patches and builds the GitHub revisions instead of your
+edits. Use `./dev-build.sh <subcommand>`, or `--ci` for CI parity, and confirm
+`git status Cargo.lock` is clean before committing.
+
+Have the script, so require it (11): `bridge-solver`, `bridge-solver-service`,
+`bridge-table-service`, `bridge-wrangler`, `bridge-encodings`, `bridge-rulebot`,
+`Bridge-Parsers`, `Bridge-Event-Parser-Service`, `EDGAR-Defense-Toolkit`,
+`dealer3`, `pbn-to-pdf`.
+
+No internal git dependencies, so bare cargo is safe (4): this repo,
+`bridge-types`, `printpdf-fork`, `Bridge-Dealer-Service`.
+
 ## Notifications
 
 Send Pushover notifications when work is blocked or completed:
