@@ -15,6 +15,29 @@ is byte-for-byte identical.
 matters if your handouts carry student names or anything else you would rather
 not put on someone else's server.
 
+That claim is enforced, not just asserted. The page ships a Content Security
+Policy with `connect-src 'self'`, which the *browser* applies — the page cannot
+switch it off. It blocks `fetch`, `XMLHttpRequest`, `WebSocket`,
+`navigator.sendBeacon` and tracking pixels to every other origin.
+
+A page can never prove its own innocence, so the site instead makes it easy to
+check independently:
+
+- **Disconnect from the network** once the page has loaded, then build a
+  handout anyway. It works. (Verified: with the web server stopped, the page
+  still produced a valid PDF and downloaded it.)
+- **Watch the Network tab** while building — there are no requests.
+- **Try to make it leak** from the developer console and watch the browser
+  refuse. The site gives you the snippet.
+- **Read or rebuild it.** The front end is dependency-free JavaScript with no
+  build step, so the source is what runs; the engine is this Rust crate.
+
+The one honest caveat, stated on the site too: the policy allows requests back
+to its own origin, because that is how the WebAssembly module loads. That
+origin is GitHub Pages — static hosting with nothing that could accept an
+upload. If that is not good enough for your documents, use the CLI, which has
+no network code at all.
+
 ## Installation
 
 ```bash

