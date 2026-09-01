@@ -14,8 +14,21 @@
   connect-src 'self' is the important one: it blocks fetch, XMLHttpRequest,
   WebSocket, EventSource and navigator.sendBeacon to every origin except the
   one this page was served from. 'self' rather than 'none' only because the
-  WebAssembly module is itself fetched from here; the origin is GitHub Pages,
-  which serves static files and has nothing that could receive an upload.
+  WebAssembly module is itself fetched from here.
+
+  What 'self' means changed when this moved: it used to be GitHub Pages, a
+  static host with nothing that could receive an upload. Served from
+  bridge-craftwork.com/pdf-handouts/ the origin is not inert — it has a
+  /download/ redirector and proxies the other tools. So the policy still proves
+  "nothing reaches another origin", which is what it is described as doing
+  throughout, but it no longer doubles as proof that nothing could be received
+  at all.
+
+  Deliberately NOT tightened to a path. It would restore the stronger reading
+  at the cost of breaking the page when served from the project's own pages.dev
+  root, and the page's own code sends nothing anywhere — the offline check in
+  the verification section is the one that settles it, and that check does not
+  depend on the origin.
 
   form-action 'none' stops the page navigating your data anywhere as a form
   submission, which is the other common way bytes leave a browser.
@@ -219,6 +232,13 @@ new Image().src = 'https://example.com/x?d=test';</code></pre>
           before they let you paste anything — a sensible precaution you should
           keep. Nothing above sends real data; it only tries to reach a dummy
           address so you can see the refusal.
+        </p>
+        <p class="aside">
+          To be precise about what this covers: the policy blocks every
+          <em>other</em> origin. It still allows the page to talk to the one it
+          was served from, because that is where it fetches its own WebAssembly
+          from. So this check proves your files cannot be sent elsewhere; the
+          offline check above is the one that proves they are not sent at all.
         </p>
       </li>
 

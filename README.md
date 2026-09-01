@@ -4,7 +4,7 @@ A cross-platform command-line tool for merging PDFs and adding custom headers an
 
 ## Use it in your browser
 
-<https://bridge-craftwork.github.io/pdf-handouts/>
+<https://bridge-craftwork.com/pdf-handouts/>
 
 Drop your PDFs and screenshots on the page, fill in the title and footers, and
 download the finished handout. It is the same Rust code compiled to
@@ -19,6 +19,11 @@ That claim is enforced, not just asserted. The page ships a Content Security
 Policy with `connect-src 'self'`, which the *browser* applies — the page cannot
 switch it off. It blocks `fetch`, `XMLHttpRequest`, `WebSocket`,
 `navigator.sendBeacon` and tracking pixels to every other origin.
+
+The policy allows the page's own origin, since that is where it fetches its
+WebAssembly from — so it proves your files cannot go *elsewhere*, rather than
+proving nothing is sent at all. For that, use the offline check: load the page,
+disconnect, and build a handout. It still works.
 
 A page can never prove its own innocence, so the site instead makes it easy to
 check independently:

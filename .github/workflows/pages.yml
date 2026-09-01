@@ -10,6 +10,11 @@ on:
       - 'assets/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      # The hosting half of the deploy: a change to the Pages config or the
+      # redirect stub has to redeploy too, or the live site would keep serving
+      # the old one with nothing to say so.
+      - 'wrangler.jsonc'
+      - 'github-pages-redirect/**'
       - '.github/workflows/pages.yml'
   # Lets the site be redeployed without a code change.
   workflow_dispatch:
@@ -19,16 +24,21 @@ permissions:
   pages: write
   id-token: write
 
-# Let a running deploy finish rather than cancelling it half-published.
+# Latest wins: a superseded deploy has nothing worth finishing.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  # Read here rather than inside a step so a step's `if` can test them —
+  # secrets cannot be referenced directly in `if`.
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
-  build:
+  # ── The site — Cloudflare Pages ────────────────────────────────────────
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,22 +57,94 @@ jobs:
         working-directory: wasm
         run: wasm-pack build --release --target web --out-dir ../web/pkg --no-typescript
 
+      # A missing bundle produces a page that loads, shows the whole interface,
+      # and then does nothing when you give it a file. Fail here instead.
       - name: Check the bundle landed
         run: |
           test -f web/pkg/pdf_handouts_wasm_bg.wasm
           test -f web/pkg/pdf_handouts_wasm.js
           ls -lh web/pkg
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: web
+      # Cloudflare Pages is now the only host for the tool itself, so a silent
+      # skip would be dangerous: the run would go green having deployed
+      # nothing. Fail explicitly when the credential is missing, while still
+      # letting a fork build.
+      - name: Require the Cloudflare credential
+        if: github.repository == 'bridge-craftwork/pdf-handouts' && env.CLOUDFLARE_API_TOKEN == ''
+        run: |
+          echo "CLOUDFLARE_API_TOKEN is not set, so the site cannot be deployed." >&2
+          echo "The token needs Account -> Cloudflare Pages -> Edit on this account." >&2
+          exit 1
 
-  deploy:
-    needs: build
+      # What the credential can actually see. A deploy failure is otherwise
+      # reported as a bare "Authentication error", which is indistinguishable
+      # between a wrong account, a missing permission, and a token scoped to
+      # some other project.
+      - name: Show what the credential can reach
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        continue-on-error: true
+        run: npx --yes wrangler@4 pages project list
+
+      # First deploy only: `pages deploy` cannot create a project without a
+      # prompt, and there is no prompt in CI. Idempotent — a second run finds
+      # the project already there and moves on.
+      - name: Create the Pages project if it does not exist
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          if npx --yes wrangler@4 pages project list | grep -qw 'pdf-handouts'; then
+            echo "Project pdf-handouts already exists."
+          else
+            npx --yes wrangler@4 pages project create pdf-handouts --production-branch main
+          fi
+
+      # `--commit-dirty` because the checkout now carries the generated wasm
+      # bundle, which wrangler would otherwise refuse to deploy from.
+      - name: Deploy to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx --yes wrangler@4 pages deploy --commit-dirty=true
+
+  # ── The old address — GitHub Pages ─────────────────────────────────────
+  # STILL PUBLISHES THE REAL SITE, deliberately. The redirect stub in
+  # `github-pages-redirect/` is written and ready, but swapping to it now would
+  # create a loop: bridge-craftwork.com/pdf-handouts/ currently proxies THIS
+  # host, so a stub pointing there would send visitors round in a circle and
+  # the tool would be unreachable.
+  #
+  # The order has to be: this deploy makes pdf-handouts.pages.dev real, then
+  # the bridge-craftwork-site Worker is repointed at it, and only then does
+  # `path:` below change to `github-pages-redirect`. That last step is a
+  # one-line follow-up once the mount is confirmed serving from Pages.
+  #
+  # Independent of the Cloudflare job rather than `needs:` it, so a credential
+  # problem there cannot also take down the address people already have.
+  github-pages:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+
+      - name: Build the WebAssembly bundle
+        working-directory: wasm
+        run: wasm-pack build --release --target web --out-dir ../web/pkg --no-typescript
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # Becomes `github-pages-redirect` once the Worker is repointed.
+          path: web
+
       - id: deployment
         uses: actions/deploy-pages@v4
