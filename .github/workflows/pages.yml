@@ -76,10 +76,34 @@ jobs:
           echo "The token needs Account -> Cloudflare Pages -> Edit on this account." >&2
           exit 1
 
-      # What the credential can actually see. A deploy failure is otherwise
-      # reported as a bare "Authentication error", which is indistinguishable
-      # between a wrong account, a missing permission, and a token scoped to
-      # some other project.
+      # What the credential actually is, and what it can reach. Cloudflare
+      # reports several different problems as the same opaque error — a wrong
+      # account id, a token without Pages permission, and a token for another
+      # account all surface as "Could not route ... [code: 7003]" — so pin down
+      # which one before trying to deploy.
+      #
+      # `whoami` needs no account id, so it separates "the token is bad" from
+      # "the account id is bad". Neither an account id nor a permission list is
+      # a credential; the account id is in this org's configs already.
+      - name: Identify the credential
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        continue-on-error: true
+        run: npx --yes wrangler@4 whoami
+
+      # A pasted secret that picked up a newline or a space produces exactly
+      # the 7003 above, and nothing else in the output would show it.
+      - name: Check the account id's shape
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        continue-on-error: true
+        run: |
+          echo "account id length: ${#CLOUDFLARE_ACCOUNT_ID} (expected 32)"
+          if printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "account id shape: OK"
+          else
+            echo "account id shape: WRONG — expected 32 lowercase hex characters."
+            echo "Whitespace picked up when pasting the secret looks exactly like this."
+          fi
+
       - name: Show what the credential can reach
         if: env.CLOUDFLARE_API_TOKEN != ''
         continue-on-error: true
