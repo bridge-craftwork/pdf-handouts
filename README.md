@@ -20,6 +20,11 @@ Policy with `connect-src 'self'`, which the *browser* applies — the page canno
 switch it off. It blocks `fetch`, `XMLHttpRequest`, `WebSocket`,
 `navigator.sendBeacon` and tracking pixels to every other origin.
 
+The policy allows the page's own origin, since that is where it fetches its
+WebAssembly from — so it proves your files cannot go *elsewhere*, rather than
+proving nothing is sent at all. For that, use the offline check: load the page,
+disconnect, and build a handout. It still works.
+
 A page can never prove its own innocence, so the site instead makes it easy to
 check independently:
 
