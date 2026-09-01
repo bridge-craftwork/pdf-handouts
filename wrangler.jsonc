@@ -1,0 +1,31 @@
+// Cloudflare Pages configuration.
+//
+// The site is a static build: the merge runs in the visitor's browser as
+// WebAssembly, so there is nothing server-side to deploy and no PDF ever leaves
+// the machine. Everything the deploy needs lives here rather than in dashboard
+// settings, so a hosting change is a reviewable diff.
+//
+// Deploy with `npx wrangler pages deploy` after building the wasm bundle into
+// `web/pkg` (see .github/workflows/pages.yml).
+//
+// Cloudflare Pages rather than GitHub Pages, which hosted this until now: the
+// browser build is mounted at bridge-craftwork.com/pdf-handouts/ by the
+// bridge-craftwork-site Worker, and this was the last tool on a different
+// hosting product. GitHub Pages also cannot set response headers at all, so
+// the CSP in web/index.html has to be a meta tag rather than a real header —
+// on Pages that becomes fixable.
+//
+// Hostnames, for the record — Pages custom domains are dashboard/API state, so
+// wrangler will not create these from here:
+//
+//   pdf-handouts.pages.dev            the project's own domain
+//   bridge-craftwork.com/pdf-handouts/  the path mount, proxied by the site Worker
+{
+  "name": "pdf-handouts",
+  "compatibility_date": "2026-09-01",
+
+  // There is no bundler: `web/` is hand-written HTML, CSS and JS, and the
+  // build only adds `web/pkg` from wasm-pack. So the source directory IS the
+  // output directory.
+  "pages_build_output_dir": "web"
+}

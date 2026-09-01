@@ -14,8 +14,21 @@
   connect-src 'self' is the important one: it blocks fetch, XMLHttpRequest,
   WebSocket, EventSource and navigator.sendBeacon to every origin except the
   one this page was served from. 'self' rather than 'none' only because the
-  WebAssembly module is itself fetched from here; the origin is GitHub Pages,
-  which serves static files and has nothing that could receive an upload.
+  WebAssembly module is itself fetched from here.
+
+  NOTE, and it is a real weakening: 'self' used to mean GitHub Pages, a static
+  host with nothing that could receive an upload. The tool is now served from
+  bridge-craftwork.com/pdf-handouts/, and that origin is NOT inert — it has a
+  /download/ redirector and proxies the other tools, one of which accepts a
+  telemetry POST. Nothing in this page connects to any of them, and no bytes
+  leave the tab in practice, but the policy no longer proves that by itself the
+  way it did.
+
+  Tightening it to a path — connect-src 'self' plus only this tool's own
+  directory — would restore the guarantee, at the cost of the page no longer
+  working when served from the project's own pages.dev root. That is a
+  deliberate decision, not a detail, so it is written down here rather than
+  quietly made.
 
   form-action 'none' stops the page navigating your data anywhere as a form
   submission, which is the other common way bytes leave a browser.

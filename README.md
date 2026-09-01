@@ -4,7 +4,7 @@ A cross-platform command-line tool for merging PDFs and adding custom headers an
 
 ## Use it in your browser
 
-<https://bridge-craftwork.github.io/pdf-handouts/>
+<https://bridge-craftwork.com/pdf-handouts/>
 
 Drop your PDFs and screenshots on the page, fill in the title and footers, and
 download the finished handout. It is the same Rust code compiled to
