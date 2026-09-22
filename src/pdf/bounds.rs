@@ -11,24 +11,30 @@
 //! unnecessary shrinking, while an underestimate would let content collide with
 //! the title. Two approximations are worth knowing about:
 //!
-//! - **Text width** is estimated at roughly half an em per character rather than
-//!   read from font metrics. Vertical extent, which is what the fitting decision
-//!   turns on for portrait pages, uses the font size directly and is accurate.
+//! - **Text width** comes from the font's advance widths: its own `/Widths` or
+//!   CID `/W` table, or Adobe's published metrics for the standard fonts, which
+//!   carry no table. It matters on landscape pages, where the bands sit at the
+//!   short edges and a line's width decides how far content must shrink. Only a
+//!   font none of these describe falls back to half an em per character.
+//!   Vertical extent uses the font size directly.
 //! - **White fills are ignored.** Generated PDFs routinely paint a white
 //!   background rectangle over the whole page; counting it would make every page
 //!   look full-bleed. White ink on white paper is invisible, so skipping it
 //!   matches what a reader sees.
 
 use crate::pdf::fit::{apply, concat, Matrix, Rect, IDENTITY};
+use crate::pdf::standard_widths;
 use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 /// How far above the baseline a glyph may reach, as a fraction of font size.
 const GLYPH_ASCENT: f32 = 0.9;
 /// How far below the baseline a glyph may reach, as a fraction of font size.
 const GLYPH_DESCENT: f32 = 0.25;
-/// Assumed average glyph advance, as a fraction of font size.
-const AVERAGE_ADVANCE: f32 = 0.5;
+/// Assumed glyph advance for a font with no usable metrics, in 1/1000 em.
+const AVERAGE_ADVANCE: f32 = 500.0;
 /// Fill colours at or above this brightness count as white and are skipped.
 const WHITE_THRESHOLD: f32 = 0.95;
 /// How deep to follow nested form XObjects before falling back to their BBox.
@@ -43,10 +49,11 @@ struct GraphicsState {
 }
 
 /// Text state tracked between `BT` and `ET`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct TextState {
     matrix: Matrix,
     line_matrix: Matrix,
+    font: Rc<FontWidths>,
     font_size: f32,
     leading: f32,
     char_spacing: f32,
@@ -60,6 +67,7 @@ impl Default for TextState {
         TextState {
             matrix: IDENTITY,
             line_matrix: IDENTITY,
+            font: Rc::new(FontWidths::Unknown),
             font_size: 0.0,
             leading: 0.0,
             char_spacing: 0.0,
@@ -128,6 +136,7 @@ impl Walker<'_> {
         };
         let mut stack: Vec<GraphicsState> = Vec::new();
         let mut text = TextState::default();
+        let mut fonts: HashMap<Vec<u8>, Rc<FontWidths>> = HashMap::new();
         let mut path: Option<Rect> = None;
         let mut pending_clip = false;
 
@@ -230,6 +239,12 @@ impl Walker<'_> {
                 }
                 "ET" => {}
                 "Tf" => {
+                    if let Some(Object::Name(name)) = operands.first() {
+                        text.font = fonts
+                            .entry(name.clone())
+                            .or_insert_with(|| Rc::new(font_widths(self.doc, resources, name)))
+                            .clone();
+                    }
                     if let Some(size) = num(operands, 1) {
                         text.font_size = size;
                     }
@@ -318,11 +333,29 @@ impl Walker<'_> {
             return;
         }
 
-        let spaces = bytes.iter().filter(|b| **b == b' ').count() as f32;
-        let advance = (bytes.len() as f32 * AVERAGE_ADVANCE * text.font_size
-            + bytes.len() as f32 * text.char_spacing
-            + spaces * text.word_spacing)
-            * text.horizontal_scale;
+        // tx = ((w0 / 1000) * Tfs + Tc + Tw) * Th for each glyph, where word
+        // spacing applies only to a single-byte space (PDF 32000 §9.4.4).
+        let font = &text.font;
+        let per_glyph = |code: u32, single_byte: bool| {
+            let word = if single_byte && code == 32 {
+                text.word_spacing
+            } else {
+                0.0
+            };
+            font.width(code) / 1000.0 * text.font_size + text.char_spacing + word
+        };
+        let raw: f32 = if font.is_two_byte() {
+            bytes
+                .chunks(2)
+                .map(|pair| {
+                    let code = pair.iter().fold(0u32, |acc, b| (acc << 8) | u32::from(*b));
+                    per_glyph(code, false)
+                })
+                .sum()
+        } else {
+            bytes.iter().map(|b| per_glyph(u32::from(*b), true)).sum()
+        };
+        let advance = raw * text.horizontal_scale;
 
         // Render modes 3 and 7 paint nothing — typically an OCR layer under a
         // scanned image. Advance past them but do not count them as ink.
@@ -446,6 +479,223 @@ impl Walker<'_> {
             self.add(rect, None);
         }
     }
+}
+
+/// What is known about a font's glyph advances, in 1/1000 em.
+#[derive(Debug, Clone)]
+enum FontWidths {
+    /// One byte per glyph, with the font's own `/Widths` from `first_char`.
+    Simple {
+        first_char: u32,
+        widths: Vec<f32>,
+        missing: Option<f32>,
+    },
+    /// A standard font with no table of its own, in WinAnsi order from 32.
+    Standard(&'static [u16; 224]),
+    /// Every glyph the same width (Courier).
+    Fixed(f32),
+    /// Two bytes per glyph through an Identity CMap, widths by CID.
+    Composite {
+        default: f32,
+        widths: HashMap<u32, f32>,
+    },
+    /// Nothing usable: each byte is taken as one average glyph.
+    Unknown,
+}
+
+impl FontWidths {
+    /// Whether strings in this font use two-byte codes.
+    fn is_two_byte(&self) -> bool {
+        matches!(self, FontWidths::Composite { .. })
+    }
+
+    /// Advance width of one character code.
+    fn width(&self, code: u32) -> f32 {
+        let known = match self {
+            FontWidths::Simple {
+                first_char,
+                widths,
+                missing,
+            } => code
+                .checked_sub(*first_char)
+                .and_then(|i| widths.get(i as usize).copied())
+                .or(*missing),
+            FontWidths::Standard(table) => code
+                .checked_sub(32)
+                .and_then(|i| table.get(i as usize))
+                .filter(|w| **w != 0)
+                .map(|w| f32::from(*w)),
+            FontWidths::Fixed(w) => Some(*w),
+            FontWidths::Composite { default, widths } => {
+                Some(widths.get(&code).copied().unwrap_or(*default))
+            }
+            FontWidths::Unknown => None,
+        };
+        known.unwrap_or(AVERAGE_ADVANCE)
+    }
+}
+
+/// Learn a font's glyph widths from the resource named `name`.
+fn font_widths(doc: &Document, resources: &Dictionary, name: &[u8]) -> FontWidths {
+    let font = resolve_dict(doc, resources, b"Font")
+        .and_then(|fonts| resolve(doc, fonts.get(name).ok()?))
+        .and_then(|o| match o {
+            Object::Dictionary(d) => Some(d),
+            _ => None,
+        });
+    let Some(font) = font else {
+        return FontWidths::Unknown;
+    };
+
+    let subtype = font
+        .get(b"Subtype")
+        .ok()
+        .and_then(|o| o.as_name().ok())
+        .unwrap_or(b"");
+
+    match subtype {
+        b"Type0" => composite_widths(doc, &font),
+        // Type 3 widths are in glyph space, not text space; not worth the
+        // FontMatrix arithmetic for how rarely they turn up.
+        b"Type3" => FontWidths::Unknown,
+        _ => simple_widths(doc, &font),
+    }
+}
+
+/// Widths of a simple (single-byte) font.
+fn simple_widths(doc: &Document, font: &Dictionary) -> FontWidths {
+    let widths = font
+        .get(b"Widths")
+        .ok()
+        .and_then(|o| resolve(doc, o))
+        .and_then(|o| match o {
+            Object::Array(arr) => Some(arr.iter().filter_map(as_num).collect::<Vec<f32>>()),
+            _ => None,
+        })
+        .filter(|w| !w.is_empty());
+
+    if let Some(widths) = widths {
+        let first_char = font
+            .get(b"FirstChar")
+            .ok()
+            .and_then(|o| o.as_i64().ok())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(0);
+        let missing = resolve_dict(doc, font, b"FontDescriptor")
+            .and_then(|d| d.get(b"MissingWidth").ok().and_then(as_num));
+        return FontWidths::Simple {
+            first_char,
+            widths,
+            missing,
+        };
+    }
+
+    let base = font
+        .get(b"BaseFont")
+        .ok()
+        .and_then(|o| o.as_name().ok())
+        .unwrap_or(b"");
+    standard_font(base)
+}
+
+/// The metrics of a standard font — or a common stand-in for one, such as
+/// Arial for Helvetica — named without a width table of its own.
+fn standard_font(base_font: &[u8]) -> FontWidths {
+    let name = String::from_utf8_lossy(base_font).to_ascii_lowercase();
+    // Drop a subset tag such as "ABCDEF+".
+    let name = name.split_once('+').map_or(name.as_str(), |(_, rest)| rest);
+    let bold = name.contains("bold");
+    let slanted = name.contains("italic") || name.contains("oblique");
+
+    if name.starts_with("courier") {
+        return FontWidths::Fixed(600.0);
+    }
+    let table = if name.starts_with("times") {
+        match (bold, slanted) {
+            (false, false) => &standard_widths::TIMES_ROMAN,
+            (true, false) => &standard_widths::TIMES_BOLD,
+            (false, true) => &standard_widths::TIMES_ITALIC,
+            (true, true) => &standard_widths::TIMES_BOLD_ITALIC,
+        }
+    } else if name.starts_with("helvetica") || name.starts_with("arial") {
+        match (bold, slanted) {
+            (false, false) => &standard_widths::HELVETICA,
+            (true, false) => &standard_widths::HELVETICA_BOLD,
+            (false, true) => &standard_widths::HELVETICA_OBLIQUE,
+            (true, true) => &standard_widths::HELVETICA_BOLD_OBLIQUE,
+        }
+    } else {
+        return FontWidths::Unknown;
+    };
+    FontWidths::Standard(table)
+}
+
+/// Widths of a composite font, when its codes map straight to CIDs.
+fn composite_widths(doc: &Document, font: &Dictionary) -> FontWidths {
+    let identity = matches!(
+        font.get(b"Encoding").ok().and_then(|o| o.as_name().ok()),
+        Some(b"Identity-H") | Some(b"Identity-V")
+    );
+    if !identity {
+        return FontWidths::Unknown;
+    }
+
+    let descendant = font
+        .get(b"DescendantFonts")
+        .ok()
+        .and_then(|o| resolve(doc, o))
+        .and_then(|o| match o {
+            Object::Array(arr) => arr.first().and_then(|d| resolve(doc, d)),
+            _ => None,
+        })
+        .and_then(|o| match o {
+            Object::Dictionary(d) => Some(d),
+            _ => None,
+        });
+    let Some(descendant) = descendant else {
+        return FontWidths::Unknown;
+    };
+
+    let default = descendant
+        .get(b"DW")
+        .ok()
+        .and_then(as_num)
+        .unwrap_or(1000.0);
+
+    // /W mixes two forms: `c [w1 w2 ...]` and `c_first c_last w`.
+    let mut widths = HashMap::new();
+    if let Some(Object::Array(w)) = descendant.get(b"W").ok().and_then(|o| resolve(doc, o)) {
+        let mut i = 0;
+        while i < w.len() {
+            let Some(first) = w[i].as_i64().ok().and_then(|v| u32::try_from(v).ok()) else {
+                break;
+            };
+            match w.get(i + 1).and_then(|o| resolve(doc, o)) {
+                Some(Object::Array(run)) => {
+                    for (offset, width) in run.iter().filter_map(as_num).enumerate() {
+                        widths.insert(first + offset as u32, width);
+                    }
+                    i += 2;
+                }
+                Some(last) => {
+                    let (Some(last), Some(width)) = (
+                        last.as_i64().ok().and_then(|v| u32::try_from(v).ok()),
+                        w.get(i + 2).and_then(as_num),
+                    ) else {
+                        break;
+                    };
+                    // Guard against a corrupt range claiming millions of CIDs.
+                    for cid in first..=last.min(first.saturating_add(0xFFFF)) {
+                        widths.insert(cid, width);
+                    }
+                    i += 3;
+                }
+                None => break,
+            }
+        }
+    }
+
+    FontWidths::Composite { default, widths }
 }
 
 /// Grow a rectangle to include a point, creating it if needed.
@@ -589,6 +839,11 @@ mod tests {
 
     /// Build a one-page document whose content stream is `ops`.
     fn page_with(ops: Vec<Operation>) -> (Document, ObjectId) {
+        page_with_fonts(ops, Dictionary::new())
+    }
+
+    /// Build a one-page document with `fonts` as its font resources.
+    fn page_with_fonts(ops: Vec<Operation>, fonts: Dictionary) -> (Document, ObjectId) {
         let mut doc = Document::with_version("1.5");
         let content = Content { operations: ops };
         let stream_id = doc.add_object(lopdf::Stream::new(
@@ -601,7 +856,9 @@ mod tests {
         page.set("Type", Object::Name(b"Page".to_vec()));
         page.set("Parent", Object::Reference(pages_id));
         page.set("Contents", Object::Reference(stream_id));
-        page.set("Resources", Object::Dictionary(Dictionary::new()));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        page.set("Resources", Object::Dictionary(resources));
         let page_id = doc.add_object(Object::Dictionary(page));
 
         let mut pages = Dictionary::new();
@@ -808,6 +1065,130 @@ mod tests {
             "text should have width: {:?}",
             bounds
         );
+    }
+
+    fn name(n: &str) -> Object {
+        Object::Name(n.as_bytes().to_vec())
+    }
+
+    /// Show `text` at (100, 500) in font resource `F1` at 20pt.
+    fn show_in_f1(text: &[u8]) -> Vec<Operation> {
+        vec![
+            op("BT", vec![]),
+            op("Tf", vec![name("F1"), real(20.0)]),
+            op("Td", vec![real(100.0), real(500.0)]),
+            op(
+                "Tj",
+                vec![Object::String(text.to_vec(), lopdf::StringFormat::Literal)],
+            ),
+            op("ET", vec![]),
+        ]
+    }
+
+    fn font_dict(entries: Vec<(&str, Object)>) -> Dictionary {
+        let mut d = Dictionary::new();
+        d.set("Type", name("Font"));
+        for (k, v) in entries {
+            d.set(k, v);
+        }
+        d
+    }
+
+    fn with_f1(font: Dictionary) -> Dictionary {
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", Object::Dictionary(font));
+        fonts
+    }
+
+    #[test]
+    fn a_standard_font_is_measured_with_its_published_widths() {
+        // The heading that used to overshoot by 41pt on the declarer's-plan
+        // pages. In Times-Roman at 18pt it is 184pt wide, not the 225pt that
+        // half an em per character gives.
+        let font = font_dict(vec![
+            ("Subtype", name("Type1")),
+            ("BaseFont", name("Times-Roman")),
+            ("Encoding", name("WinAnsiEncoding")),
+        ]);
+        let mut ops = show_in_f1(b"Goal: at most ____ losers");
+        ops[1] = op("Tf", vec![name("F1"), real(18.0)]);
+        let (doc, page_id) = page_with_fonts(ops, with_f1(font));
+
+        let bounds = content_bounds(&doc, page_id).expect("text should be measured");
+        assert!((bounds.width() - 183.996).abs() < 0.01, "{:?}", bounds);
+    }
+
+    #[test]
+    fn a_font_width_table_takes_precedence() {
+        // "AB" with A = 700 and B = 300 at 20pt is 20pt wide.
+        let font = font_dict(vec![
+            ("Subtype", name("TrueType")),
+            ("BaseFont", name("Helvetica")),
+            ("FirstChar", Object::Integer(65)),
+            (
+                "Widths",
+                Object::Array(vec![Object::Integer(700), Object::Integer(300)]),
+            ),
+        ]);
+        let (doc, page_id) = page_with_fonts(show_in_f1(b"AB"), with_f1(font));
+
+        let bounds = content_bounds(&doc, page_id).expect("text should be measured");
+        assert!((bounds.width() - 20.0).abs() < 0.01, "{:?}", bounds);
+    }
+
+    #[test]
+    fn a_composite_font_reads_two_byte_codes_and_cid_widths() {
+        // Two glyphs, CIDs 1 and 2: CID 1 from a `c [w]` run, CID 2 from the
+        // default width. 896 + 1000 at 20pt is 37.92pt.
+        let descendant = font_dict(vec![
+            ("Subtype", name("CIDFontType2")),
+            ("DW", Object::Integer(1000)),
+            (
+                "W",
+                Object::Array(vec![
+                    Object::Integer(1),
+                    Object::Array(vec![Object::Integer(896)]),
+                ]),
+            ),
+        ]);
+        let font = font_dict(vec![
+            ("Subtype", name("Type0")),
+            ("Encoding", name("Identity-H")),
+            (
+                "DescendantFonts",
+                Object::Array(vec![Object::Dictionary(descendant)]),
+            ),
+        ]);
+        let (doc, page_id) = page_with_fonts(show_in_f1(&[0, 1, 0, 2]), with_f1(font));
+
+        let bounds = content_bounds(&doc, page_id).expect("text should be measured");
+        assert!((bounds.width() - 37.92).abs() < 0.01, "{:?}", bounds);
+    }
+
+    #[test]
+    fn an_unknown_font_falls_back_to_half_an_em_per_byte() {
+        let font = font_dict(vec![
+            ("Subtype", name("Type1")),
+            ("BaseFont", name("Futura-Medium")),
+        ]);
+        let (doc, page_id) = page_with_fonts(show_in_f1(b"abcd"), with_f1(font));
+
+        let bounds = content_bounds(&doc, page_id).expect("text should be measured");
+        assert!((bounds.width() - 40.0).abs() < 0.01, "{:?}", bounds);
+    }
+
+    #[test]
+    fn stand_ins_for_standard_fonts_use_their_metrics() {
+        assert!(matches!(
+            standard_font(b"ABCDEF+Arial,Bold"),
+            FontWidths::Standard(t) if std::ptr::eq(t, &standard_widths::HELVETICA_BOLD)
+        ));
+        assert!(matches!(
+            standard_font(b"TimesNewRomanPS-ItalicMT"),
+            FontWidths::Standard(t) if std::ptr::eq(t, &standard_widths::TIMES_ITALIC)
+        ));
+        assert!(matches!(standard_font(b"Courier-Bold"), FontWidths::Fixed(w) if w == 600.0));
+        assert!(matches!(standard_font(b"Symbol"), FontWidths::Unknown));
     }
 
     #[test]

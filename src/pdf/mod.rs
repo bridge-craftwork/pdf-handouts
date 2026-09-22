@@ -7,6 +7,7 @@ pub mod headers;
 pub mod image;
 pub mod merge;
 pub mod metadata;
+mod standard_widths;
 
 // Re-export commonly used items
 pub use create::{create_watermark_pdf, WatermarkOptions};

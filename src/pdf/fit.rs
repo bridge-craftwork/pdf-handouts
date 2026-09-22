@@ -28,6 +28,11 @@ pub type Matrix = [f32; 6];
 /// The identity transform.
 pub const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
+/// Closest that fitting will move content to a page edge, in points (½ inch).
+///
+/// Most printers cannot print the outer quarter inch or so of a sheet.
+const EDGE_MARGIN: f32 = 36.0;
+
 /// Combine two transforms: the result applies `first`, then `second`.
 pub fn concat(first: Matrix, second: Matrix) -> Matrix {
     let [a1, b1, c1, d1, e1, f1] = first;
@@ -239,6 +244,20 @@ pub fn fit_content(
     if content.y0 >= safe_low && content.y1 <= safe_high {
         return None;
     }
+
+    // Where the content may be placed. A side with no title or footer has no
+    // band, but its bare edge is still no place to put content: printers cannot
+    // reach it, and filling the band would otherwise push the content flush
+    // against it. Keep an edge margin there — unless the source already sat
+    // closer, which is the author's choice and not ours to make worse.
+    let place_low = safe_low.max(EDGE_MARGIN.min(content.y0));
+    let place_high = safe_high.min((frame.frame_height() - EDGE_MARGIN).max(content.y1));
+    let (safe_low, safe_high) = if place_high > place_low {
+        (place_low, place_high)
+    } else {
+        (safe_low, safe_high)
+    };
+    let available = safe_high - safe_low;
 
     let (scale, action) = if content.height() <= available || mode == FitMode::ShiftOnly {
         (1.0, FitAction::Unchanged)
@@ -462,6 +481,52 @@ mod tests {
             x0 >= 72.0 - 0.01,
             "content still in the title band at {}",
             x0
+        );
+    }
+
+    #[test]
+    fn filling_the_band_never_pushes_content_onto_an_untitled_edge() {
+        // A landscape page past the first: footer along the right-hand short
+        // edge, no title on the left. The measured content spans nearly the
+        // whole page (x 43..790, the right end overestimated from text width),
+        // so it must be scaled — and centring it in a band that ran all the way
+        // to the left edge used to put it at x = 0, off the printable area.
+        let frame = PageFrame::new(792.0, 612.0);
+        let content = rect(42.96, 72.0, 790.04, 540.0);
+        let fit = fit_content(&frame, content, 63.3, 792.0, FitMode::Auto)
+            .expect("content overruns the footer band");
+
+        let (left, _) = apply(fit.transform, content.x0, content.y0);
+        let (right, _) = apply(fit.transform, content.x1, content.y0);
+        assert!(
+            left >= EDGE_MARGIN - 0.01,
+            "content pushed to the page edge at {}",
+            left
+        );
+        assert!(
+            right <= 792.0 - 63.3 + 0.01,
+            "content still in the footer band at {}",
+            right
+        );
+    }
+
+    #[test]
+    fn content_already_near_an_edge_is_not_pushed_closer() {
+        // Portrait, no title: content 10pt from the top overruns the footer.
+        // The edge margin cannot be honoured without shrinking, but the fit
+        // must at least not move it nearer the top than the source had it.
+        let frame = PageFrame::new(612.0, 792.0);
+        let content = rect(50.0, 40.0, 560.0, 782.0);
+        let fit = fit_content(&frame, content, 63.3, 792.0, FitMode::Auto)
+            .expect("content overruns the footer band");
+
+        let (_, top) = apply(fit.transform, content.x0, content.y1);
+        let (_, bottom) = apply(fit.transform, content.x0, content.y0);
+        assert!(top <= 782.0 + 0.01, "content moved up to {}", top);
+        assert!(
+            bottom >= 63.3 - 0.01,
+            "content still in the footer at {}",
+            bottom
         );
     }
 
