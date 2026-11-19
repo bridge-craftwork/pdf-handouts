@@ -33,7 +33,9 @@ env:
   CARGO_TERM_COLOR: always
   # Read here rather than inside a step so a step's `if` can test them —
   # secrets cannot be referenced directly in `if`.
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  # The token is the organization's, shared with the other tools' sites so it
+  # is rotated in one place; wrangler reads it as CLOUDFLARE_API_TOKEN.
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
@@ -80,7 +82,7 @@ jobs:
       - name: Require the Cloudflare credential
         if: github.repository == 'bridge-craftwork/pdf-handouts' && env.CLOUDFLARE_API_TOKEN == ''
         run: |
-          echo "CLOUDFLARE_API_TOKEN is not set, so the site cannot be deployed." >&2
+          echo "CLOUDFLARE_PAGES_DEPLOY_TOKEN is not set, so the site cannot be deployed." >&2
           echo "The token needs Account -> Cloudflare Pages -> Edit on this account." >&2
           exit 1
 
